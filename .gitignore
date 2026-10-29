@@ -1,1 +1,8 @@
 node_modules/
+
+# forge: keep permanent docs, ignore volatile loop state
+.forge/*
+!.forge/CONTEXT.md
+!.forge/adr/
+!.forge/retro/
+!.forge/followups.md
