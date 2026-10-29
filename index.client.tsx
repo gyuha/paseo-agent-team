@@ -1,11 +1,12 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
+import { messages } from "./client/i18n";
 import { TeamPanel } from "./client/TeamPanel";
 
 export default function contribute(client: PluginClientContext) {
-  client.addWorkspacePanel({ id: "team", title: "에이전트 팀", icon: "Users", locations: ["workspace"], Component: TeamPanel });
+  client.addWorkspacePanel({ id: "team", title: messages.message("panelTitle"), icon: "Users", locations: ["workspace"], Component: TeamPanel });
   client.addCommandCenterItem({
     id: "team",
-    title: "팀 만들기",
+    title: messages.message("commandTitle"),
     icon: "Users",
     keywords: ["team", "agents", "orchestrator", "팀", "에이전트"],
     context: "workspace",
