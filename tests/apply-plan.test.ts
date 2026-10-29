@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planWorkspaces, workspaceLabel } from "../shared/apply-plan";
+import { ensureWorkspaces, planWorkspaces, workspaceLabel } from "../shared/apply-plan";
 import type { Team } from "../shared/team";
 
 const team: Team = {
@@ -47,5 +47,22 @@ describe("planWorkspaces", () => {
       { id: "wks_2", name: "y", title: "Sound" },
     ];
     expect(planWorkspaces(team, existing)[2]?.existingId).toBe("wks_1");
+  });
+});
+
+describe("ensureWorkspaces", () => {
+  it("creates missing workspaces orchestrator-last, so Paseo's sidebar shows it on top, and returns them orchestrator-first", async () => {
+    const created: string[] = [];
+    const steps = planWorkspaces(team, [{ id: "wks_d", name: "Design", title: null }]);
+    const result = await ensureWorkspaces(steps, async (title) => {
+      created.push(title);
+      return `new_${title}`;
+    });
+    expect(created).toEqual(["sound", "orchestrator"]);
+    expect(result).toEqual([
+      { target: "orchestrator", workspace: "orchestrator", id: "new_orchestrator", created: true },
+      { target: "design", workspace: "Design", id: "wks_d", created: false },
+      { target: "sound", workspace: "sound", id: "new_sound", created: true },
+    ]);
   });
 });

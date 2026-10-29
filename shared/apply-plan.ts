@@ -31,3 +31,20 @@ export function planWorkspaces(team: Team, existing: readonly WorkspaceRef[]): W
     ...team.roles.map((role) => ({ target: role.name, workspace: role.workspace, existingId: find(role.workspace) })),
   ];
 }
+
+export interface AppliedWorkspace {
+  target: string;
+  workspace: string;
+  id: string;
+  created: boolean;
+}
+
+/**
+ * Creates the missing workspaces last step first: Paseo's sidebar puts a workspace it hasn't seen yet on top,
+ * so the orchestrator's ends up above the roles. Returns them in step order, orchestrator first.
+ */
+export async function ensureWorkspaces(steps: readonly WorkspaceStep[], create: (title: string) => Promise<string>): Promise<AppliedWorkspace[]> {
+  const ids: string[] = [];
+  for (let at = steps.length - 1; at >= 0; at -= 1) ids[at] = steps[at]!.existingId ?? (await create(steps[at]!.workspace));
+  return steps.map((step, at) => ({ target: step.target, workspace: step.workspace, id: ids[at]!, created: step.existingId === null }));
+}

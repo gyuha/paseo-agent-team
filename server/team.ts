@@ -2,7 +2,7 @@ import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { planWorkspaces } from "../shared/apply-plan";
+import { ensureWorkspaces, planWorkspaces } from "../shared/apply-plan";
 import { LABEL, PLANNER_WORKSPACE, plannerCleanup } from "../shared/cleanup";
 import { orchestratorPrompt } from "../shared/prompt";
 import { extractProposal, plannerPrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
@@ -124,12 +124,7 @@ export async function applyTeam({ team: input, ...target }: RpcInput<typeof team
 
   const { entries } = await paseo.workspaces.list();
   const existing = entries.filter((workspace) => workspace.projectId === project.id && !workspace.archivingAt);
-  const workspaces: { target: string; workspace: string; id: string; created: boolean }[] = [];
-  // Paseo's sidebar lists the newest workspace first, so create them last-role-first to put the orchestrator on top.
-  for (const step of planWorkspaces(team, existing).reverse()) {
-    const id = step.existingId ?? (await paseo.workspaces.create({ title: step.workspace, source: { kind: "directory", path: project.root, projectId: project.id } })).id;
-    workspaces.unshift({ target: step.target, workspace: step.workspace, id, created: step.existingId === null });
-  }
+  const workspaces = await ensureWorkspaces(planWorkspaces(team, existing), async (title) => (await paseo.workspaces.create({ title, source: { kind: "directory", path: project.root, projectId: project.id } })).id);
 
   const lead = workspaces[0]!;
   // Applying again keeps the orchestrator already running on the same model and tells it to re-read the team.
