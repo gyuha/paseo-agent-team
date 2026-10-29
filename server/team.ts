@@ -1,4 +1,3 @@
-import type { PaseoApi } from "@getpaseo/client";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
@@ -13,6 +12,7 @@ import { checkTeam, parseTeam, serializeTeam, TEAM_FILE } from "../shared/team";
 import { catalogFrom, validateTeam, type ProviderEntry } from "../shared/validate";
 
 
+type PaseoApi = PluginHandlerContext["paseo"];
 type Target = { workspaceId: string } | { projectId: string };
 
 async function allProjects(paseo: PaseoApi): Promise<ProjectRef[]> {
