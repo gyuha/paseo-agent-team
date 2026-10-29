@@ -4,6 +4,8 @@ A [Paseo](https://paseo.sh) plugin for project-scoped agent teams. Each role in 
 
 For example, in a game project, design work can go to Codex, sound to Antigravity and gameplay code to Claude. You describe the goal once, review the proposed team, and from then on you talk to one orchestrator.
 
+![Reviewing a proposed team: one orchestrator and four roles, each with its own provider, model, folders and instructions](images/create-agent-team.png)
+
 ## Concepts
 
 | Term | Meaning |
