@@ -67,8 +67,11 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
   }, 330_000);
 
   it("applies the team: file, workspaces and orchestrator", async () => {
+    // A planner workspace with nothing left in it, as the sidebar screen leaves behind for a project without workspaces.
+    const plannerWorkspace = (await paseo.workspaces.create({ title: "Team planner", source: { kind: "directory", path: root, projectId } })).id;
     const result = await applyTeam({ workspaceId, team: proposed }, { paseo });
     if (!result.ok) throw new Error(result.errors.join("\n"));
+    expect(result.cleanup).toEqual([]);
     expect(JSON.parse(readFileSync(join(root, TEAM_FILE), "utf8")).roles.length).toBe(proposed.roles.length);
     expect(result.workspaces).toHaveLength(proposed.roles.length + 1);
 
@@ -79,6 +82,13 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     const orchestrator = await paseo.agents.ref(result.orchestratorAgentId).refresh();
     expect(orchestrator?.agent.workspaceId).toBe(result.workspaces[0]!.id);
     expect(orchestrator?.agent.provider).toBe(proposed.orchestrator.provider);
+
+    // Planners are archived, and so is the emptied Team planner workspace; the team's workspaces stay.
+    const projectWorkspaces = (await paseo.workspaces.list()).entries.filter((entry) => entry.projectId === projectId && !entry.archivingAt).map((entry) => entry.id);
+    expect(projectWorkspaces).not.toContain(plannerWorkspace);
+    expect(projectWorkspaces).toEqual(expect.arrayContaining([workspaceId, ...result.workspaces.map((workspace) => workspace.id)]));
+    const planners = (await paseo.agents.list()).entries.map((entry) => entry.agent).filter((agent) => agent.labels["workspace-agents"] === "planner" && !agent.archivedAt && projectWorkspaces.includes(agent.workspaceId ?? ""));
+    expect(planners).toEqual([]);
 
     // Applying again by project id reuses everything and the project no longer lists as teamless.
     const again = await applyTeam({ projectId, team: proposed }, { paseo });

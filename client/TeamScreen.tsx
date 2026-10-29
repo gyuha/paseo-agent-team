@@ -1,6 +1,6 @@
 import type { PluginScreenProps, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
-import { SidebarRow } from "@getpaseo/plugin/client/ui";
+import { SidebarRow, useToast } from "@getpaseo/plugin/client/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
@@ -32,6 +32,7 @@ export function TeamScreen({ theme, layout, navigation }: PluginScreenProps) {
   const s = useMemo(() => styles(theme.colors, layout.compact), [theme, layout.compact]);
   const { t } = useTranslation(messages);
   const teamless = useTeamlessProjects();
+  const toast = useToast();
   const [projectId, setProjectId] = useState<string | null>(null);
 
   if (projectId) {
@@ -45,7 +46,11 @@ export function TeamScreen({ theme, layout, navigation }: PluginScreenProps) {
           layout={layout}
           navigation={navigation}
           target={{ projectId }}
-          onApplied={(result) => navigation?.openWorkspace({ workspaceId: result.workspaces[0]!.id })}
+          onApplied={(result) => {
+            // The screen is left right away, so cleanup problems go to a toast instead of the result card.
+            if (result.cleanup.length) toast.error(t("result.cleanupFailed", { failure: result.cleanup.join("; ") }));
+            navigation?.openWorkspace({ workspaceId: result.workspaces[0]!.id });
+          }}
         />
       </View>
     );

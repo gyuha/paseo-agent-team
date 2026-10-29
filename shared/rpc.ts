@@ -58,12 +58,19 @@ export const teamProposalRpc = defineRpc({
 
 const AppliedWorkspaceSchema = z.object({ target: z.string(), workspace: z.string(), id: z.string(), created: z.boolean() });
 
-/** Writes the team file, creates missing workspaces and starts the orchestrator. */
+/** Writes the team file, creates missing workspaces, starts the orchestrator and archives the planners. */
 export const teamApplyRpc = defineRpc({
   name: "team.apply",
   input: TargetSchema.and(z.object({ team: z.unknown() })),
   output: z.discriminatedUnion("ok", [
     z.object({ ok: z.literal(false), errors: z.array(z.string()) }),
-    z.object({ ok: z.literal(true), file: z.string(), workspaces: z.array(AppliedWorkspaceSchema), orchestratorAgentId: z.string() }),
+    z.object({
+      ok: z.literal(true),
+      file: z.string(),
+      workspaces: z.array(AppliedWorkspaceSchema),
+      orchestratorAgentId: z.string(),
+      /** Planners or planner workspaces that could not be archived; the team itself was applied. */
+      cleanup: z.array(z.string()),
+    }),
   ]),
 });

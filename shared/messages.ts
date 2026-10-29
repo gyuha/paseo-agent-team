@@ -44,6 +44,7 @@ export const en = {
     created: "{{target}} → {{workspace}} (created)",
     reused: "{{target}} → {{workspace}} (reused)",
     openOrchestrator: "Open orchestrator",
+    cleanupFailed: "Could not clean up the planner: {{failure}}",
   },
 } as const;
 
@@ -93,5 +94,6 @@ export const ko: Shape<typeof en> = {
     created: "{{target}} → {{workspace}} (새로 만듦)",
     reused: "{{target}} → {{workspace}} (기존 재사용)",
     openOrchestrator: "오케스트레이터 열기",
+    cleanupFailed: "계획 에이전트를 정리하지 못했습니다: {{failure}}",
   },
 };

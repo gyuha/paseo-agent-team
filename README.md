@@ -51,7 +51,9 @@ Open a workspace in the project you want a team for, then:
 
 To skip the planner, press **Start with an empty team** and fill in the roles yourself.
 
-Applying does three things in order. It writes `.agents/team.json`, makes sure every role has a workspace, and starts the orchestrator. An existing workspace with the same title is reused, and a missing one is created in the project. If an orchestrator is already running in its workspace on the same provider and model, it is kept and told to re-read the team instead of starting a second one.
+Applying does four things in order. It writes `.agents/team.json`, makes sure every role has a workspace, starts the orchestrator, and cleans up the planners. An existing workspace with the same title is reused, and a missing one is created in the project. If an orchestrator is already running in its workspace on the same provider and model, it is kept and told to re-read the team instead of starting a second one.
+
+Cleanup archives every planner agent left in the project, including ones from proposals you cancelled. A `Team planner` workspace is archived too, but only when the team doesn't use it and no other agent is left in it. If cleanup fails, the team is still applied and the failure is shown as a warning.
 
 ```mermaid
 flowchart TD
@@ -70,13 +72,15 @@ flowchart TD
   J --> K
   K -->|Yes| L[Tell it to re-read the team]
   K -->|No| M[Start the orchestrator]
+  L --> N[Archive planners and an emptied Team planner workspace]
+  M --> N
 
   classDef action fill:#5179b0,stroke:#33557f,color:#ffffff
   classDef decision fill:#f2c14e,stroke:#b8902f,color:#222222
   classDef result fill:#4caf7a,stroke:#2f7d52,color:#ffffff
   class A,C,D,E,G action
   class B,F,H,K decision
-  class I,J,L,M result
+  class I,J,L,M,N result
 ```
 
 ### 2. Work through the orchestrator
