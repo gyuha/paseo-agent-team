@@ -28,6 +28,7 @@ describe("orchestratorPrompt", () => {
 
   it("tells it how to delegate with the role's own provider and model", () => {
     expect(prompt).toContain("paseo run --workspace <workspace-id> --provider <provider>/<model>");
+    expect(prompt).toContain("--mode auto");
     expect(prompt).toMatch(/already has an agent.*send/s);
     expect(prompt).toMatch(/wait/);
   });

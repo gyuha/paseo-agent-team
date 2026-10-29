@@ -152,7 +152,7 @@ The plugin's UI follows Paseo's app language. English is the default and Korean 
 
 - A role's model applies to agents started by the orchestrator or this plugin. Agents you start yourself in a role's workspace from Paseo's own UI still use whatever model you pick there.
 - Role workspaces are local workspaces of the same checkout, so they share one folder. Keep roles to separate folders, or have the orchestrator run overlapping work in sequence.
-- The planner runs in the provider's default mode. It is told not to change files but is not technically prevented from doing so.
+- The planner, the orchestrator and the role agents start in Auto mode when their provider offers one (Claude does); other providers use their default mode. The planner is told not to change files but is not technically prevented from doing so.
 - Very long workspace or agent lists are read as a single page. On hosts with a lot of workspaces, an existing workspace could be missed and created again.
 
 ## Development

@@ -18,7 +18,7 @@ export function orchestratorPrompt(team: Team): string {
     "## How to delegate",
     "- Split each request into parts and give each part to the role that owns it. Do the work yourself only when no role fits.",
     "- Find a role's workspace by its title among this project's workspaces (Paseo tools, or `paseo workspace ls --json`).",
-    "- Start a role's agent in its workspace with exactly that role's provider and model: Paseo tools, or `paseo run --workspace <workspace-id> --provider <provider>/<model> --label role=<role> --no-wait \"<task>\"`.",
+    "- Start a role's agent in its workspace with exactly that role's provider and model: Paseo tools, or `paseo run --workspace <workspace-id> --provider <provider>/<model> --label role=<role> --no-wait \"<task>\"`. Add `--mode auto` when the provider offers an `auto` mode (Claude does).",
     "- If the role's workspace already has an agent for this line of work, continue with it using send (`paseo send <agent-id> \"<task>\"`) instead of starting another.",
     "- Keep roles inside their folders. When two parts touch the same files, run them one after another, not at the same time.",
     "- Wait for the agents you started (`paseo wait <agent-id>`), read their results (`paseo logs <agent-id>`), then report what each role did and what is left.",

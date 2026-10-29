@@ -6,6 +6,7 @@ export interface ProviderEntry {
   enabled: boolean;
   status: string;
   models?: readonly { id: string; label: string; isSelectable?: boolean }[];
+  modes?: readonly { id: string }[];
 }
 
 export interface ProviderInfo {
@@ -19,6 +20,11 @@ export interface TeamError {
   /** "orchestrator" or the role name. */
   target: string;
   message: string;
+}
+
+/** "auto" when the provider offers Auto mode, so new agents start in it instead of the provider's default. */
+export function autoModeOf(entries: readonly ProviderEntry[], provider: string): string | undefined {
+  return entries.find((entry) => entry.provider === provider)?.modes?.some((mode) => mode.id === "auto") ? "auto" : undefined;
 }
 
 /** The enabled providers and their selectable models. */

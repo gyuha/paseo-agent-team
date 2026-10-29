@@ -9,7 +9,7 @@ import { extractProposal, plannerPrompt, TEAM_JSON_SCHEMA } from "../shared/prop
 import { plannerWorkspace, projectsWithoutTeam, type ProjectRef } from "../shared/projects";
 import type { teamApplyRpc, teamProjectsRpc, teamProposalRpc, teamProposeRpc, teamReadRpc } from "../shared/rpc";
 import { checkTeam, parseTeam, serializeTeam, TEAM_FILE } from "../shared/team";
-import { catalogFrom, validateTeam, type ProviderEntry } from "../shared/validate";
+import { autoModeOf, catalogFrom, validateTeam, type ProviderEntry } from "../shared/validate";
 
 
 type PaseoApi = PluginHandlerContext["paseo"];
@@ -75,8 +75,9 @@ export async function readTeam(target: RpcInput<typeof teamReadRpc>, { paseo }: 
 
 export async function proposeTeam({ goal, ...target }: RpcInput<typeof teamProposeRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamProposeRpc>> {
   const entries = await providerEntries(paseo);
+  const provider = plannerProvider(entries);
   const agent = await paseo.workspaces.ref(await plannerWorkspaceOf(paseo, target)).agents.create({
-    config: { provider: plannerProvider(entries) },
+    config: { provider, modeId: autoModeOf(entries, provider.split("/")[0]!) },
     title: "Team planner",
     prompt: plannerPrompt(goal, catalogFrom(entries)),
     outputSchema: TEAM_JSON_SCHEMA,
@@ -112,7 +113,8 @@ export async function applyTeam({ team: input, ...target }: RpcInput<typeof team
   const checked = checkTeam(input);
   if (!checked.ok) return { ok: false, errors: checked.errors };
   const team = checked.team;
-  const problems = validateTeam(team, catalogFrom(await providerEntries(paseo)));
+  const providers = await providerEntries(paseo);
+  const problems = validateTeam(team, catalogFrom(providers));
   if (problems.length) return { ok: false, errors: problems.map((problem) => `${problem.target}: ${problem.message}`) };
 
   const project = await projectOf(paseo, target);
@@ -137,7 +139,7 @@ export async function applyTeam({ team: input, ...target }: RpcInput<typeof team
     return { ok: true, file, workspaces, orchestratorAgentId: running.id, cleanup: await archivePlanners(paseo, plannerCleanup(existing, agents, team)) };
   }
   const orchestrator = await paseo.workspaces.ref(lead.id).agents.create({
-    config: { provider: `${team.orchestrator.provider}/${team.orchestrator.model}`, systemPrompt: orchestratorPrompt(team) },
+    config: { provider: `${team.orchestrator.provider}/${team.orchestrator.model}`, modeId: autoModeOf(providers, team.orchestrator.provider), systemPrompt: orchestratorPrompt(team) },
     title: "Orchestrator",
     prompt: `Read ${TEAM_FILE}, then reply with a short summary of the team (role, workspace, provider/model) and say you are ready for a request. Do not start any agents yet.`,
     labels: { [LABEL]: "orchestrator" },

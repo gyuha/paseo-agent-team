@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Team } from "../shared/team";
-import { catalogFrom, validateTeam, type ProviderEntry } from "../shared/validate";
+import { autoModeOf, catalogFrom, validateTeam, type ProviderEntry } from "../shared/validate";
 
 const entries: ProviderEntry[] = [
-  { provider: "claude", enabled: true, status: "ready", models: [{ id: "claude-opus-5-5", label: "Opus 5.5" }] },
-  { provider: "codex", enabled: true, status: "ready", models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol" }, { id: "hidden", label: "Hidden", isSelectable: false }] },
+  { provider: "claude", enabled: true, status: "ready", models: [{ id: "claude-opus-5-5", label: "Opus 5.5" }], modes: [{ id: "default" }, { id: "auto" }] },
+  { provider: "codex", enabled: true, status: "ready", modes: [{ id: "auto-review" }], models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol" }, { id: "hidden", label: "Hidden", isSelectable: false }] },
   { provider: "antigravity", enabled: true, status: "ready", models: [{ id: "gemini-4-argon-high", label: "Gemini 4 Argon (High)" }] },
   { provider: "copilot", enabled: true, status: "unavailable", models: [{ id: "gpt-x", label: "x" }] },
   { provider: "omp", enabled: false, status: "ready", models: [{ id: "m", label: "m" }] },
@@ -59,5 +59,14 @@ describe("validateTeam", () => {
   it("checks the orchestrator too", () => {
     const errors = validateTeam({ ...team, orchestrator: { ...team.orchestrator, model: "nope" } }, catalog);
     expect(errors).toEqual([{ target: "orchestrator", message: 'model "nope" is not available for claude' }]);
+  });
+});
+
+describe("autoModeOf", () => {
+  it("returns auto only for providers that offer it", () => {
+    expect(autoModeOf(entries, "claude")).toBe("auto");
+    expect(autoModeOf(entries, "codex")).toBeUndefined();
+    expect(autoModeOf(entries, "antigravity")).toBeUndefined();
+    expect(autoModeOf(entries, "gemini")).toBeUndefined();
   });
 });
