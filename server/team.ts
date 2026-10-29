@@ -125,9 +125,10 @@ export async function applyTeam({ team: input, ...target }: RpcInput<typeof team
   const { entries } = await paseo.workspaces.list();
   const existing = entries.filter((workspace) => workspace.projectId === project.id && !workspace.archivingAt);
   const workspaces: { target: string; workspace: string; id: string; created: boolean }[] = [];
-  for (const step of planWorkspaces(team, existing)) {
+  // Paseo's sidebar lists the newest workspace first, so create them last-role-first to put the orchestrator on top.
+  for (const step of planWorkspaces(team, existing).reverse()) {
     const id = step.existingId ?? (await paseo.workspaces.create({ title: step.workspace, source: { kind: "directory", path: project.root, projectId: project.id } })).id;
-    workspaces.push({ target: step.target, workspace: step.workspace, id, created: step.existingId === null });
+    workspaces.unshift({ target: step.target, workspace: step.workspace, id, created: step.existingId === null });
   }
 
   const lead = workspaces[0]!;
