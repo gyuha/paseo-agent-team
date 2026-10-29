@@ -66,6 +66,10 @@ function ModelPicker({ s, catalog, provider, model, onChange }: { s: Styles; cat
 
 function RoleEditor({ s, role, catalog, onChange, onRemove }: { s: Styles; role: Role; catalog: readonly ProviderInfo[]; onChange(role: Role): void; onRemove(): void }) {
   const [folders, setFolders] = useState(foldersText(role.folders));
+  // Keyed by position, so resync when another role's removal hands this editor different folders.
+  useEffect(() => {
+    if (foldersText(parseFolders(folders)) !== foldersText(role.folders)) setFolders(foldersText(role.folders));
+  }, [role.folders]);
   return (
     <View style={s.card}>
       <View style={s.row}>
