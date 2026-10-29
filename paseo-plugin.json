@@ -1,6 +1,6 @@
 {
-  "id": "paseo-workspace-agents",
-  "name": "Workspace Agents",
+  "id": "paseo-agent-team",
+  "name": "Paseo Agent Team",
   "media": [],
   "requirements": {
     "paseo": ">=0.13.0"

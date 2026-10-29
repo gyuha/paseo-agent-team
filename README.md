@@ -1,4 +1,4 @@
-# paseo-workspace-agents
+# Paseo Agent Team
 
 A [Paseo](https://paseo.sh) plugin for project-scoped agent teams. Each role in a project gets its own workspace and its own provider and model, and an orchestrator agent hands work to them.
 
@@ -27,11 +27,11 @@ The team lives in the repository rather than in plugin settings, so it is shared
 From a local checkout:
 
 ```bash
-git clone https://github.com/gyuha/paseo-workspace-agents.git
-cd paseo-workspace-agents
+git clone https://github.com/gyuha/paseo-agent-team.git
+cd paseo-agent-team
 npm install
 paseo plugin install "$(pwd)"
-paseo plugin ls   # paseo-workspace-agents should be "running"
+paseo plugin ls   # paseo-agent-team should be "running"
 ```
 
 Or paste the absolute path of the checkout into **Settings → Plugins → Plugin source** in Paseo. Reload the Paseo window afterwards so the app picks up the plugin's UI.
@@ -160,8 +160,8 @@ npm install            # .npmrc sets legacy-peer-deps, which works around an npm
 npm run typecheck
 npm test               # unit tests
 PASEO_E2E=1 npx vitest run tests/daemon.e2e.test.ts   # against the local daemon
-paseo plugin reload paseo-workspace-agents
-paseo plugin logs paseo-workspace-agents
+paseo plugin reload paseo-agent-team
+paseo plugin logs paseo-agent-team
 ```
 
 The end-to-end test starts real agents (a planner and an orchestrator) in a temporary project under the system temp folder, so it costs tokens. It connects to `ws://127.0.0.1:6767/ws` unless `PASEO_URL` is set.

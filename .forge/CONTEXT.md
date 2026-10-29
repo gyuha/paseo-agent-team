@@ -1,4 +1,4 @@
-# paseo-workspace-agents
+# Paseo Agent Team
 
 하나의 Paseo 프로젝트 안에서, 역할별로 다른 provider/모델을 쓰는 에이전트들을 오케스트레이터가 지휘하는 구조를 다룬다.
 
