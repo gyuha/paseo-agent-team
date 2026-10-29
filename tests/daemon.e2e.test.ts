@@ -7,13 +7,14 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { applyTeam, proposeTeam, readTeam, teamProposal } from "../server/team";
+import { applyTeam, teamlessProjects, proposeTeam, readTeam, teamProposal } from "../server/team";
 import { TEAM_FILE, TeamSchema, type Team } from "../shared/team";
 
 describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemon", () => {
   let paseo: PaseoClient;
   let root: string;
   let workspaceId: string;
+  let projectId: string;
   let proposed: Team;
 
   beforeAll(async () => {
@@ -22,6 +23,7 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     root = mkdtempSync(join(tmpdir(), "pwa-game-"));
     execFileSync("git", ["init", "-q", root]);
     workspaceId = (await paseo.workspaces.create({ title: "main", source: { kind: "directory", path: root } })).id;
+    projectId = (await paseo.workspaces.ref(workspaceId).refresh())!.projectId;
   }, 60_000);
 
   afterAll(async () => {
@@ -33,6 +35,20 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     expect(result.team).toBeNull();
     expect(result.project.root).toBe(root);
     expect(result.catalog.some((provider) => provider.ready)).toBe(true);
+  });
+
+  it("reads the same project by its id and lists it as having no team", async () => {
+    const result = await readTeam({ projectId }, { paseo });
+    expect(result.team).toBeNull();
+    expect(result.project).toEqual({ id: projectId, name: expect.any(String), root });
+    expect((await teamlessProjects({}, { paseo })).some((project) => project.id === projectId)).toBe(true);
+  });
+
+  it("starts the planner in an existing workspace of the project when given only the project", async () => {
+    const { agentId } = await proposeTeam({ projectId, goal: "A tiny CLI tool" }, { paseo });
+    const planner = paseo.agents.ref(agentId);
+    expect((await planner.refresh())?.agent.workspaceId).toBe(workspaceId);
+    await planner.archive();
   });
 
   it("gets a valid proposal from the planner", async () => {
@@ -64,8 +80,10 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     expect(orchestrator?.agent.workspaceId).toBe(result.workspaces[0]!.id);
     expect(orchestrator?.agent.provider).toBe(proposed.orchestrator.provider);
 
-    const again = await applyTeam({ workspaceId, team: proposed }, { paseo });
+    // Applying again by project id reuses everything and the project no longer lists as teamless.
+    const again = await applyTeam({ projectId, team: proposed }, { paseo });
     expect(again.ok && again.workspaces.every((workspace) => !workspace.created)).toBe(true);
     expect(again.ok && again.orchestratorAgentId).toBe(result.orchestratorAgentId);
+    expect((await teamlessProjects({}, { paseo })).some((project) => project.id === projectId)).toBe(false);
   }, 120_000);
 });

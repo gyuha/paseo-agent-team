@@ -1,6 +1,7 @@
-import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
+import type { RpcOutput } from "@getpaseo/plugin";
+import type { PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc, useTranslation } from "@getpaseo/plugin/client";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { foldersText, newRole, parseFolders } from "../shared/draft";
@@ -11,7 +12,7 @@ import { validateTeam, type ProviderInfo } from "../shared/validate";
 
 type Colors = PluginWorkspacePanelProps["theme"]["colors"];
 
-function styles(colors: Colors, compact: boolean) {
+export function styles(colors: Colors, compact: boolean) {
   return {
     screen: { flex: 1, backgroundColor: colors.surface0 },
     body: { padding: compact ? 12 : 20, gap: 12 },
@@ -31,9 +32,9 @@ function styles(colors: Colors, compact: boolean) {
   };
 }
 
-type Styles = ReturnType<typeof styles>;
+export type Styles = ReturnType<typeof styles>;
 
-function Button({ s, label, onPress, disabled, secondary }: { s: Styles; label: string; onPress(): void; disabled?: boolean; secondary?: boolean }) {
+export function Button({ s, label, onPress, disabled, secondary }: { s: Styles; label: string; onPress(): void; disabled?: boolean; secondary?: boolean }) {
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress} style={[secondary ? s.secondary : s.button, disabled ? { opacity: 0.5 } : null]}>
       <Text style={secondary ? s.text : s.buttonText}>{label}</Text>
@@ -94,15 +95,28 @@ function RoleEditor({ s, role, catalog, onChange, onRemove }: { s: Styles; role:
   );
 }
 
-export function TeamPanel({ theme, layout, workspaceId, navigation }: PluginWorkspacePanelProps) {
+/** Where the team goes: a workspace's project, or a project picked without a workspace. */
+type Target = { workspaceId: string } | { projectId: string };
+
+type Applied = Extract<RpcOutput<typeof teamApplyRpc>, { ok: true }>;
+
+export const TEAMLESS_KEY = ["workspace-agents", "teamless"] as const;
+
+export function TeamPanel({ workspaceId, ...props }: PluginWorkspacePanelProps) {
+  return <TeamEditor {...props} target={{ workspaceId }} />;
+}
+
+/** Propose, review and apply a team for the target's project. */
+export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pick<PluginScreenProps, "theme" | "layout" | "navigation"> & { target: Target; onApplied?(result: Applied): void }) {
   const s = useMemo(() => styles(theme.colors, layout.compact), [theme, layout.compact]);
   const { t } = useTranslation(messages);
+  const queryClient = useQueryClient();
   const read = useRpc(teamReadRpc);
   const propose = useRpc(teamProposeRpc);
   const proposal = useRpc(teamProposalRpc);
   const apply = useRpc(teamApplyRpc);
 
-  const current = useQuery({ queryKey: ["workspace-agents", "team", workspaceId], queryFn: () => read({ workspaceId }) });
+  const current = useQuery({ queryKey: ["workspace-agents", "team", target], queryFn: () => read(target) });
   const [goal, setGoal] = useState("");
   const [plannerId, setPlannerId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Team | null>(null);
@@ -117,8 +131,15 @@ export function TeamPanel({ theme, layout, workspaceId, navigation }: PluginWork
     if (planning.data?.status === "done") setDraft(planning.data.team);
   }, [planning.data]);
 
-  const start = useMutation({ mutationFn: () => propose({ workspaceId, goal }), onSuccess: ({ agentId }) => setPlannerId(agentId) });
-  const applied = useMutation({ mutationFn: (team: Team) => apply({ workspaceId, team }), onSuccess: () => void current.refetch() });
+  const start = useMutation({ mutationFn: () => propose({ ...target, goal }), onSuccess: ({ agentId }) => setPlannerId(agentId) });
+  const applied = useMutation({
+    mutationFn: (team: Team) => apply({ ...target, team }),
+    onSuccess: (result) => {
+      void current.refetch();
+      void queryClient.invalidateQueries({ queryKey: TEAMLESS_KEY });
+      if (result.ok) onApplied?.(result);
+    },
+  });
 
   const catalog = current.data?.catalog ?? [];
   const checked = draft ? checkTeam(draft) : null;

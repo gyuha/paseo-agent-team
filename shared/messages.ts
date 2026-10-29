@@ -5,6 +5,12 @@ export const en = {
   commandTitle: "Create agent team",
   loading: "Loading…",
   title: "Agent team · {{project}}",
+  screen: {
+    title: "Create an agent team: choose a project",
+    choose: "Choose",
+    none: "Every project already has a team.",
+    back: "Back to projects",
+  },
   current: {
     orchestrator: "Orchestrator: {{workspace}} · {{model}}",
     edit: "Edit",
@@ -48,6 +54,12 @@ export const ko: Shape<typeof en> = {
   commandTitle: "에이전트 팀 만들기",
   loading: "불러오는 중…",
   title: "에이전트 팀 · {{project}}",
+  screen: {
+    title: "에이전트 팀 만들기: 프로젝트 선택",
+    choose: "선택",
+    none: "모든 프로젝트에 이미 팀이 있습니다.",
+    back: "프로젝트 목록으로",
+  },
   current: {
     orchestrator: "오케스트레이터: {{workspace}} · {{model}}",
     edit: "편집",

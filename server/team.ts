@@ -1,21 +1,42 @@
 import type { PaseoApi } from "@getpaseo/client";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { planWorkspaces } from "../shared/apply-plan";
 import { orchestratorPrompt } from "../shared/prompt";
 import { extractProposal, plannerPrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
-import type { teamApplyRpc, teamProposalRpc, teamProposeRpc, teamReadRpc } from "../shared/rpc";
+import { plannerWorkspace, projectsWithoutTeam, type ProjectRef } from "../shared/projects";
+import type { teamApplyRpc, teamProjectsRpc, teamProposalRpc, teamProposeRpc, teamReadRpc } from "../shared/rpc";
 import { checkTeam, parseTeam, serializeTeam, TEAM_FILE } from "../shared/team";
 import { catalogFrom, validateTeam, type ProviderEntry } from "../shared/validate";
 
 const LABEL = "workspace-agents";
 
-async function projectOf(paseo: PaseoApi, workspaceId: string) {
-  const workspace = await paseo.workspaces.ref(workspaceId).refresh();
-  if (!workspace) throw new Error(`Workspace ${workspaceId} was not found.`);
+type Target = { workspaceId: string } | { projectId: string };
+
+async function allProjects(paseo: PaseoApi): Promise<ProjectRef[]> {
+  const { projects } = await paseo.projects.list();
+  return projects.map((project) => ({ id: project.projectId, name: project.projectCustomName || project.projectDisplayName, root: project.projectRootPath }));
+}
+
+async function projectOf(paseo: PaseoApi, target: Target): Promise<ProjectRef> {
+  if ("projectId" in target) {
+    const project = (await allProjects(paseo)).find((candidate) => candidate.id === target.projectId);
+    if (!project) throw new Error(`Project ${target.projectId} was not found.`);
+    return project;
+  }
+  const workspace = await paseo.workspaces.ref(target.workspaceId).refresh();
+  if (!workspace) throw new Error(`Workspace ${target.workspaceId} was not found.`);
   return { id: workspace.projectId, name: workspace.projectCustomName || workspace.projectDisplayName, root: workspace.projectRootPath };
+}
+
+/** The workspace to start the planner in: the given one, else one of the project's, else a new "Team planner". */
+async function plannerWorkspaceOf(paseo: PaseoApi, target: Target): Promise<string> {
+  if ("workspaceId" in target) return target.workspaceId;
+  const project = await projectOf(paseo, target);
+  const { entries } = await paseo.workspaces.list();
+  return plannerWorkspace(entries, project.id) ?? (await paseo.workspaces.create({ title: "Team planner", source: { kind: "directory", path: project.root, projectId: project.id } })).id;
 }
 
 async function providerEntries(paseo: PaseoApi): Promise<ProviderEntry[]> {
@@ -33,8 +54,14 @@ function plannerProvider(entries: readonly ProviderEntry[]): string {
   return model ? `${entry.provider}/${model.id}` : entry.provider;
 }
 
-export async function readTeam({ workspaceId }: RpcInput<typeof teamReadRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamReadRpc>> {
-  const project = await projectOf(paseo, workspaceId);
+export async function teamlessProjects(_input: RpcInput<typeof teamProjectsRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamProjectsRpc>> {
+  const projects = await allProjects(paseo);
+  const hasTeam = await Promise.all(projects.map((project) => access(join(project.root, TEAM_FILE)).then(() => true, () => false)));
+  return projectsWithoutTeam(projects, new Set(projects.filter((_, at) => hasTeam[at]).map((project) => project.id)));
+}
+
+export async function readTeam(target: RpcInput<typeof teamReadRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamReadRpc>> {
+  const project = await projectOf(paseo, target);
   const catalog = catalogFrom(await providerEntries(paseo));
   const text = await readFile(join(project.root, TEAM_FILE), "utf8").catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return null;
@@ -46,9 +73,9 @@ export async function readTeam({ workspaceId }: RpcInput<typeof teamReadRpc>, { 
   return { project, team: parsed.team, errors: [], validation: validateTeam(parsed.team, catalog), catalog };
 }
 
-export async function proposeTeam({ workspaceId, goal }: RpcInput<typeof teamProposeRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamProposeRpc>> {
+export async function proposeTeam({ goal, ...target }: RpcInput<typeof teamProposeRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamProposeRpc>> {
   const entries = await providerEntries(paseo);
-  const agent = await paseo.workspaces.ref(workspaceId).agents.create({
+  const agent = await paseo.workspaces.ref(await plannerWorkspaceOf(paseo, target)).agents.create({
     config: { provider: plannerProvider(entries) },
     title: "Team planner",
     prompt: plannerPrompt(goal, catalogFrom(entries)),
@@ -68,14 +95,14 @@ export async function teamProposal({ agentId }: RpcInput<typeof teamProposalRpc>
   return { status: "done", team: parsed.team, validation: validateTeam(parsed.team, catalogFrom(await providerEntries(paseo))) };
 }
 
-export async function applyTeam({ workspaceId, team: input }: RpcInput<typeof teamApplyRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamApplyRpc>> {
+export async function applyTeam({ team: input, ...target }: RpcInput<typeof teamApplyRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamApplyRpc>> {
   const checked = checkTeam(input);
   if (!checked.ok) return { ok: false, errors: checked.errors };
   const team = checked.team;
   const problems = validateTeam(team, catalogFrom(await providerEntries(paseo)));
   if (problems.length) return { ok: false, errors: problems.map((problem) => `${problem.target}: ${problem.message}`) };
 
-  const project = await projectOf(paseo, workspaceId);
+  const project = await projectOf(paseo, target);
   const file = join(project.root, TEAM_FILE);
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, serializeTeam(team), "utf8");

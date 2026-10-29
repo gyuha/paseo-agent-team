@@ -13,10 +13,20 @@ const TeamErrorSchema = z.object({ target: z.string(), message: z.string() });
 
 const ProjectSchema = z.object({ id: z.string(), name: z.string(), root: z.string() });
 
-/** The project of a workspace, its team file (if any) and what this host can run. */
+/** A workspace of the project, or the project itself when no workspace is open. */
+const TargetSchema = z.union([z.object({ workspaceId: z.string() }), z.object({ projectId: z.string() })]);
+
+/** The projects on this host that have no team file yet. */
+export const teamProjectsRpc = defineRpc({
+  name: "team.projects",
+  input: z.object({}),
+  output: z.array(ProjectSchema),
+});
+
+/** The project (or a workspace's project), its team file (if any) and what this host can run. */
 export const teamReadRpc = defineRpc({
   name: "team.read",
-  input: z.object({ workspaceId: z.string() }),
+  input: TargetSchema,
   output: z.object({
     project: ProjectSchema,
     team: TeamSchema.nullable(),
@@ -31,7 +41,7 @@ export const teamReadRpc = defineRpc({
 /** Starts a planner agent that proposes a team for the goal. */
 export const teamProposeRpc = defineRpc({
   name: "team.propose",
-  input: z.object({ workspaceId: z.string(), goal: z.string().trim().min(1) }),
+  input: TargetSchema.and(z.object({ goal: z.string().trim().min(1) })),
   output: z.object({ agentId: z.string() }),
 });
 
@@ -51,7 +61,7 @@ const AppliedWorkspaceSchema = z.object({ target: z.string(), workspace: z.strin
 /** Writes the team file, creates missing workspaces and starts the orchestrator. */
 export const teamApplyRpc = defineRpc({
   name: "team.apply",
-  input: z.object({ workspaceId: z.string(), team: z.unknown() }),
+  input: TargetSchema.and(z.object({ team: z.unknown() })),
   output: z.discriminatedUnion("ok", [
     z.object({ ok: z.literal(false), errors: z.array(z.string()) }),
     z.object({ ok: z.literal(true), file: z.string(), workspaces: z.array(AppliedWorkspaceSchema), orchestratorAgentId: z.string() }),

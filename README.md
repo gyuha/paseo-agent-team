@@ -43,6 +43,8 @@ Or paste the absolute path of the checkout into **Settings → Plugins → Plugi
 Open a workspace in the project you want a team for, then:
 
 1. Open the Command Center and run **Create agent team**, or open the **Agent team** workspace panel.
+
+   Without an open workspace, for example on the New workspace screen, use **Create agent team** in the sidebar instead. It lists the projects that have no `.agents/team.json` yet; pick one and continue with step 2. The planner starts in an existing workspace of that project, or in a new `Team planner` workspace if it has none. After **Apply** you are taken to the orchestrator's workspace. The sidebar item is hidden once every project has a team.
 2. Describe the goal, for example `2D platformer game`, and press **Propose a team**. A planner agent looks at the repository and proposes roles using only the providers and models that are ready on this host. It takes a minute or two; **Open planner** shows its chat.
 3. Review the proposal. You can rename roles and workspaces, pick another provider or model, set the folders each role owns, edit instructions, and add or remove roles. Problems such as an unknown model are shown in red, and **Apply** stays disabled until they are fixed.
 4. Press **Apply**.
