@@ -5,9 +5,9 @@ import { dirname, join } from "node:path";
 import { ensureWorkspaces, planWorkspaces } from "../shared/apply-plan";
 import { LABEL, PLANNER_WORKSPACE, plannerCleanup } from "../shared/cleanup";
 import { orchestratorPrompt } from "../shared/prompt";
-import { extractProposal, plannerPrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
+import { extractProposal, extractRole, plannerPrompt, ROLE_JSON_SCHEMA, rolePrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
 import { plannerWorkspace, projectsWithoutTeam, type ProjectRef } from "../shared/projects";
-import type { teamApplyRpc, teamProjectsRpc, teamProposalRpc, teamProposeRpc, teamReadRpc } from "../shared/rpc";
+import type { teamApplyRpc, teamProjectsRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRoleProposalRpc, teamRoleProposeRpc } from "../shared/rpc";
 import { checkTeam, parseTeam, serializeTeam, TEAM_FILE } from "../shared/team";
 import { autoModeOf, catalogFrom, validateTeam, type ProviderEntry } from "../shared/validate";
 
@@ -86,14 +86,41 @@ export async function proposeTeam({ goal, ...target }: RpcInput<typeof teamPropo
   return { agentId: agent.id };
 }
 
-export async function teamProposal({ agentId }: RpcInput<typeof teamProposalRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamProposalRpc>> {
+/** Waits up to a second for a planner; its final message once it has finished. */
+async function plannerAnswer(paseo: PaseoApi, agentId: string): Promise<{ status: "running" } | { status: "failed"; errors: string[] } | { status: "finished"; message: string | null }> {
   const result = await paseo.agents.ref(agentId).waitForFinish(1000);
   if (result.status === "timeout") return { status: "running" };
   if (result.status === "error") return { status: "failed", errors: [result.error ?? "the planner stopped with an error"] };
   if (result.status === "permission") return { status: "failed", errors: ["the planner is waiting for a permission; answer it in the planner's chat, then try again"] };
-  const parsed = extractProposal(result.lastMessage);
+  return { status: "finished", message: result.lastMessage };
+}
+
+export async function teamProposal({ agentId }: RpcInput<typeof teamProposalRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamProposalRpc>> {
+  const result = await plannerAnswer(paseo, agentId);
+  if (result.status !== "finished") return result;
+  const parsed = extractProposal(result.message);
   if (!parsed.ok) return { status: "failed", errors: parsed.errors };
   return { status: "done", team: parsed.team, validation: validateTeam(parsed.team, catalogFrom(await providerEntries(paseo))) };
+}
+
+export async function proposeRole({ description, team, ...target }: RpcInput<typeof teamRoleProposeRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamRoleProposeRpc>> {
+  const entries = await providerEntries(paseo);
+  const provider = plannerProvider(entries);
+  const agent = await paseo.workspaces.ref(await plannerWorkspaceOf(paseo, target)).agents.create({
+    config: { provider, modeId: autoModeOf(entries, provider.split("/")[0]!) },
+    title: "Role planner",
+    prompt: rolePrompt(description, team, catalogFrom(entries)),
+    outputSchema: ROLE_JSON_SCHEMA,
+    labels: { [LABEL]: "planner" },
+  });
+  return { agentId: agent.id };
+}
+
+export async function roleProposal({ agentId }: RpcInput<typeof teamRoleProposalRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamRoleProposalRpc>> {
+  const result = await plannerAnswer(paseo, agentId);
+  if (result.status !== "finished") return result;
+  const parsed = extractRole(result.message);
+  return parsed.ok ? { status: "done", role: parsed.role } : { status: "failed", errors: parsed.errors };
 }
 
 /** Archives the planners, then their emptied workspaces; returns what failed instead of throwing. */

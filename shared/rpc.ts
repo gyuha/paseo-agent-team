@@ -1,6 +1,6 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
-import { TeamSchema } from "./team";
+import { RoleSchema, TeamSchema } from "./team";
 
 const ProviderInfoSchema = z.object({
   id: z.string(),
@@ -52,6 +52,29 @@ export const teamProposalRpc = defineRpc({
   output: z.discriminatedUnion("status", [
     z.object({ status: z.literal("running") }),
     z.object({ status: z.literal("done"), team: TeamSchema, validation: z.array(TeamErrorSchema) }),
+    z.object({ status: z.literal("failed"), errors: z.array(z.string()) }),
+  ]),
+});
+
+const TeamOutlineSchema = z.object({
+  orchestratorWorkspace: z.string(),
+  roles: z.array(z.object({ name: z.string(), workspace: z.string(), folders: z.array(z.string()) })),
+});
+
+/** Starts a planner agent that proposes one more role for the team being edited. */
+export const teamRoleProposeRpc = defineRpc({
+  name: "team.role.propose",
+  input: TargetSchema.and(z.object({ description: z.string().trim().min(1), team: TeamOutlineSchema })),
+  output: z.object({ agentId: z.string() }),
+});
+
+/** The role planner's proposal once it has finished. */
+export const teamRoleProposalRpc = defineRpc({
+  name: "team.role.proposal",
+  input: z.object({ agentId: z.string() }),
+  output: z.discriminatedUnion("status", [
+    z.object({ status: z.literal("running") }),
+    z.object({ status: z.literal("done"), role: RoleSchema }),
     z.object({ status: z.literal("failed"), errors: z.array(z.string()) }),
   ]),
 });

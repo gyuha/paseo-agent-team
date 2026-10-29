@@ -7,8 +7,9 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { applyTeam, teamlessProjects, proposeTeam, readTeam, teamProposal } from "../server/team";
+import { applyTeam, proposeRole, teamlessProjects, proposeTeam, readTeam, roleProposal, teamProposal } from "../server/team";
 import { TEAM_FILE, TeamSchema, type Team } from "../shared/team";
+import { validateTeam } from "../shared/validate";
 
 describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemon", () => {
   let paseo: PaseoClient;
@@ -64,6 +65,23 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
     throw new Error("the planner did not finish in 5 minutes");
+  }, 330_000);
+
+  it("proposes one role from a description", async () => {
+    const team = { orchestratorWorkspace: proposed.orchestrator.workspace, roles: proposed.roles.map(({ name, workspace, folders }) => ({ name, workspace, folders })) };
+    const { agentId } = await proposeRole({ workspaceId, description: "Writes and runs end-to-end tests for the game", team }, { paseo });
+    for (let attempt = 0; attempt < 150; attempt += 1) {
+      const result = await roleProposal({ agentId }, { paseo });
+      if (result.status === "failed") throw new Error(result.errors.join("\n"));
+      if (result.status === "done") {
+        const extended = TeamSchema.parse({ ...proposed, roles: [...proposed.roles, result.role] });
+        expect(validateTeam(extended, (await readTeam({ workspaceId }, { paseo })).catalog)).toEqual([]);
+        proposed = extended;
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    throw new Error("the role planner did not finish in 5 minutes");
   }, 330_000);
 
   it("applies the team: file, workspaces and orchestrator", async () => {

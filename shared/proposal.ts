@@ -1,7 +1,15 @@
-import { checkTeam, type ParseResult } from "./team";
+import { checkTeam, RoleSchema, type ParseResult, type Role } from "./team";
 import type { ProviderInfo } from "./validate";
 
 const text = { type: "string", minLength: 1 } as const;
+
+/** The role planner's `outputSchema`: one role, every field present. */
+export const ROLE_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["name", "workspace", "provider", "model", "folders", "instructions"],
+  properties: { name: text, workspace: text, provider: text, model: text, folders: { type: "array", items: text }, instructions: { type: "string" } },
+};
 
 /** The planner agent's `outputSchema`: a complete team file, every field present. */
 export const TEAM_JSON_SCHEMA = {
@@ -17,38 +25,46 @@ export const TEAM_JSON_SCHEMA = {
       required: ["workspace", "provider", "model"],
       properties: { workspace: text, provider: text, model: text },
     },
-    roles: {
-      type: "array",
-      minItems: 1,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["name", "workspace", "provider", "model", "folders", "instructions"],
-        properties: { name: text, workspace: text, provider: text, model: text, folders: { type: "array", items: text }, instructions: { type: "string" } },
-      },
-    },
+    roles: { type: "array", minItems: 1, items: ROLE_JSON_SCHEMA },
   },
 };
 
 // outputSchema isn't enforced by every provider (Claude answered with its own key names),
 // so the prompt shows the exact shape too.
+const ROLE_EXAMPLE = { name: "<role>", workspace: "<role>", provider: "<provider id>", model: "<model id>", folders: ["<relative/path>"], instructions: "<what this role does>" };
 const EXAMPLE = {
   version: 1,
   goal: "<the goal>",
   orchestrator: { workspace: "orchestrator", provider: "<provider id>", model: "<model id>" },
-  roles: [{ name: "<role>", workspace: "<role>", provider: "<provider id>", model: "<model id>", folders: ["<relative/path>"], instructions: "<what this role does>" }],
+  roles: [ROLE_EXAMPLE],
 };
+
+function modelLines(catalog: readonly ProviderInfo[]): string[] {
+  return catalog.filter((provider) => provider.ready).map((provider) => `- ${provider.id}: ${provider.models.map((model) => model.id).join(", ")}`);
+}
+
+/** The JSON object in a planner's final message, tolerating a code fence or text around it. */
+function jsonIn(message: string | null, what: string): { ok: true; value: unknown } | { ok: false; errors: string[] } {
+  if (!message?.trim()) return { ok: false, errors: ["the planner finished without an answer"] };
+  const start = message.indexOf("{");
+  const end = message.lastIndexOf("}");
+  if (start < 0 || end <= start) return { ok: false, errors: [`the planner's answer has no JSON ${what}`] };
+  try {
+    return { ok: true, value: JSON.parse(message.slice(start, end + 1)) };
+  } catch (error) {
+    return { ok: false, errors: [`the planner's answer is not valid JSON: ${(error as Error).message}`] };
+  }
+}
 
 /** Asks a planner agent to propose a team for the goal, using only models this host can run. */
 export function plannerPrompt(goal: string, catalog: readonly ProviderInfo[]): string {
-  const models = catalog.filter((provider) => provider.ready).map((provider) => `- ${provider.id}: ${provider.models.map((model) => model.id).join(", ")}`);
   return [
     "Propose an agent team for this project. Each role gets its own Paseo workspace and runs on its own provider and model; an orchestrator hands work to them.",
     "",
     `Goal: ${goal.trim()}`,
     "",
     "Providers and model ids available on this host (use these exact ids, nothing else):",
-    ...models,
+    ...modelLines(catalog),
     "",
     "Rules:",
     "- Look around the repository to fit roles and folders to what is there. Do not create, change or delete any file.",
@@ -63,15 +79,45 @@ export function plannerPrompt(goal: string, catalog: readonly ProviderInfo[]): s
 
 /** Reads the planner's final message as a team, tolerating a code fence or text around the JSON. */
 export function extractProposal(message: string | null): ParseResult {
-  if (!message?.trim()) return { ok: false, errors: ["the planner finished without an answer"] };
-  const start = message.indexOf("{");
-  const end = message.lastIndexOf("}");
-  if (start < 0 || end <= start) return { ok: false, errors: ["the planner's answer has no JSON team"] };
-  let value: unknown;
-  try {
-    value = JSON.parse(message.slice(start, end + 1));
-  } catch (error) {
-    return { ok: false, errors: [`the planner's answer is not valid JSON: ${(error as Error).message}`] };
-  }
-  return checkTeam(value);
+  const json = jsonIn(message, "team");
+  return json.ok ? checkTeam(json.value) : json;
+}
+
+/** What the role planner needs to know about the team being edited, so the new role doesn't overlap it. */
+export interface TeamOutline {
+  orchestratorWorkspace: string;
+  roles: { name: string; workspace: string; folders: string[] }[];
+}
+
+/** Asks a planner agent for one more role matching the description, using only models this host can run. */
+export function rolePrompt(description: string, team: TeamOutline, catalog: readonly ProviderInfo[]): string {
+  const roles = team.roles.map((role) => `- ${role.name} (workspace ${role.workspace}, folders ${role.folders.length ? role.folders.join(", ") : "any"})`);
+  return [
+    "Propose one more role for this project's agent team in Paseo. The role gets its own Paseo workspace and runs on its own provider and model; an orchestrator hands work to it.",
+    "",
+    `The role: ${description.trim()}`,
+    "",
+    `The team already has these roles, and the orchestrator uses the workspace "${team.orchestratorWorkspace}":`,
+    ...(roles.length ? roles : ["- (none yet)"]),
+    "",
+    "Providers and model ids available on this host (use these exact ids, nothing else):",
+    ...modelLines(catalog),
+    "",
+    "Rules:",
+    "- Look around the repository to fit the role's folders to what is there. Do not create, change or delete any file.",
+    "- Use a short lowercase name and the same short lowercase workspace, both different from the existing roles and the orchestrator's workspace.",
+    "- Give it the folders it owns (relative paths, may be empty), avoiding folders other roles own, and one or two sentences of instructions.",
+    "- Pick the provider and model that suit this work best.",
+    "- Answer with JSON only, using exactly these keys and no others:",
+    JSON.stringify(ROLE_EXAMPLE, null, 2),
+  ].join("\n");
+}
+
+/** Reads the role planner's final message as one role, tolerating a code fence or text around the JSON. */
+export function extractRole(message: string | null): { ok: true; role: Role } | { ok: false; errors: string[] } {
+  const json = jsonIn(message, "role");
+  if (!json.ok) return json;
+  const result = RoleSchema.safeParse(json.value);
+  if (result.success) return { ok: true, role: result.data };
+  return { ok: false, errors: result.error.issues.map((issue) => `${issue.path.join(".") || "role"}: ${issue.message}`) };
 }

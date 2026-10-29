@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { foldersText, newRole, parseFolders } from "../shared/draft";
 import { messages } from "./i18n";
-import { teamApplyRpc, teamProposalRpc, teamProposeRpc, teamReadRpc } from "../shared/rpc";
+import { teamApplyRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRoleProposalRpc, teamRoleProposeRpc } from "../shared/rpc";
 import { checkTeam, type Role, type Team } from "../shared/team";
 import { validateTeam, type ProviderInfo } from "../shared/validate";
 
@@ -115,6 +115,8 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const propose = useRpc(teamProposeRpc);
   const proposal = useRpc(teamProposalRpc);
   const apply = useRpc(teamApplyRpc);
+  const proposeRole = useRpc(teamRoleProposeRpc);
+  const roleProposal = useRpc(teamRoleProposalRpc);
 
   const current = useQuery({ queryKey: ["workspace-agents", "team", target], queryFn: () => read(target) });
   const [goal, setGoal] = useState("");
@@ -130,6 +132,29 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   useEffect(() => {
     if (planning.data?.status === "done") setDraft(planning.data.team);
   }, [planning.data]);
+
+  // One AI role request at a time; its result is appended to the draft and dropped if the draft was cancelled.
+  const [roleDescription, setRoleDescription] = useState("");
+  const [rolePlannerId, setRolePlannerId] = useState<string | null>(null);
+  const rolePlanning = useQuery({
+    queryKey: ["workspace-agents", "role-proposal", rolePlannerId],
+    queryFn: () => roleProposal({ agentId: rolePlannerId! }),
+    enabled: rolePlannerId !== null,
+    refetchInterval: (query) => (query.state.data?.status === "running" || !query.state.data ? 2000 : false),
+  });
+  useEffect(() => {
+    if (rolePlanning.data?.status !== "done") return;
+    const role = rolePlanning.data.role;
+    setDraft((current) => (current ? { ...current, roles: [...current.roles, role] } : current));
+    setRoleDescription("");
+    setRolePlannerId(null);
+  }, [rolePlanning.data]);
+  const startRole = useMutation({
+    mutationFn: (team: Team) =>
+      proposeRole({ ...target, description: roleDescription, team: { orchestratorWorkspace: team.orchestrator.workspace, roles: team.roles.map(({ name, workspace, folders }) => ({ name, workspace, folders })) } }),
+    onSuccess: ({ agentId }) => setRolePlannerId(agentId),
+  });
+  const roleBusy = startRole.isPending || (rolePlannerId !== null && rolePlanning.data?.status !== "failed");
 
   const start = useMutation({ mutationFn: () => propose({ ...target, goal }), onSuccess: ({ agentId }) => setPlannerId(agentId) });
   const applied = useMutation({
@@ -195,10 +220,20 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
             <RoleEditor key={index} s={s} role={role} catalog={catalog} onChange={(next) => updateRole(index, next)} onRemove={() => setDraft({ ...draft, roles: draft.roles.filter((_, at) => at !== index) })} />
           ))}
           <Button s={s} secondary label={t("review.addRole")} onPress={() => setDraft({ ...draft, roles: [...draft.roles, newRole(catalog, draft.roles.map((role) => role.name))] })} />
+          <View style={s.card}>
+            <TextInput style={s.input} value={roleDescription} placeholder={t("review.roleDescription")} multiline onChangeText={setRoleDescription} />
+            <View style={s.row}>
+              <Button s={s} secondary label={t("review.addRoleWithAi")} disabled={!roleDescription.trim() || roleBusy} onPress={() => startRole.mutate(draft)} />
+              {rolePlannerId && navigation ? <Button s={s} secondary label={t("create.openPlanner")} onPress={() => navigation.openAgent({ agentId: rolePlannerId })} /> : null}
+            </View>
+            {roleBusy ? <Text style={s.muted}>{t("review.rolePlanning")}</Text> : null}
+            {rolePlanning.data?.status === "failed" ? rolePlanning.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
+            {startRole.error ? <Text style={s.danger}>{String(startRole.error)}</Text> : null}
+          </View>
           {problems.map((problem) => <Text key={problem} style={s.danger}>{problem}</Text>)}
           <View style={s.row}>
             <Button s={s} label={t("review.apply")} disabled={problems.length > 0 || applied.isPending} onPress={() => applied.mutate(draft)} />
-            <Button s={s} secondary label={t("review.cancel")} onPress={() => { setDraft(null); setPlannerId(null); }} />
+            <Button s={s} secondary label={t("review.cancel")} onPress={() => { setDraft(null); setPlannerId(null); setRolePlannerId(null); }} />
           </View>
         </View>
       )}
