@@ -28,3 +28,10 @@
 <!-- followup: fu-9d41c6a2e7b0 | source: per-workspace-orchestrator | task: 9 | date: 2026-10-30 | status: open | taken: - -->
 - e2e가 만든 임시 `pwa-game-*` 프로젝트의 워크스페이스는 보관되지 않아 사이드바에 쌓인다(에이전트는 보관됨). e2e의 `afterAll`에서 임시 워크스페이스도 보관한다.
   근거: UAT 중 사이드바에 `pwa-game-*` 프로젝트가 4개 이상 보였다.
+
+<!-- followup: fu-f442abd3e622 | source: keep-orchestrator-after-clear | task: 12 | date: 2026-10-30 | status: open | taken: - -->
+같은 에이전트를 그 자리에서 비우는 세션 리셋을 검토한다. 테스트 에이전트에 플러그인 send("/clear")를 보내 Paseo가 보관 후 새로 만드는지, 같은 에이전트 안에서 비우는지 측정하고, 라벨·시스템 프롬프트를 유지하는 /clear를 Paseo에 기능 요청할지 판단한다.
+
+<!-- followup: fu-14efcc321792 | source: agent-dashboard-explorer | task: 13 | date: 2026-10-30 | status: open | taken: - -->
+- 아주 좁은 폭(오른쪽 사이드바)에서는 오케스트레이터 카드를 줄여도 역할 카드가 넘친다. 역할 카드 축소나 세로 쌓기를 검토할 것.
+  Evidence: app.paseo.sh 사이드바에서 축소 카드 옆 역할 카드가 오른쪽으로 잘려 하단 스크롤이 필요했다.
