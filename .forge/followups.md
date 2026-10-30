@@ -17,6 +17,10 @@
 - 배포 스킬(`.claude/skills/deploy/SKILL.md`) 5단계를 실제 환경에 맞게 고친다. `getpaseo/plugins`에는 lockfile이 없어 `npm ci`가 실패하고, `node scripts/validate.ts`는 auto mode 분류기가 막는다. 의존성 설치 방식을 바꾸거나, 사용자가 직접 실행하는 단계로 명시하거나, 권한 규칙을 추가해야 한다.
   근거: v0.1.3 배포 때 release 에이전트와 오케스트레이터가 모두 거부당했고, 사용자가 직접 실행했을 때 `npm ci`가 EUSAGE로 실패했다.
 
-<!-- followup: fu-1145da606e5c | source: max-permission-mode | task: 4 | date: 2026-10-30 | status: open | taken: - -->
+<!-- followup: fu-1145da606e5c | source: max-permission-mode | task: 4 | date: 2026-10-30 | status: taken | taken: 7 -->
 - `tests/daemon.e2e.test.ts`가 끝날 때 자기가 만든 오케스트레이터와 그 오케스트레이터가 띄운 역할 에이전트를 보관(archive)하게 한다. 지금은 임시 `pwa-game-*` workspace에 idle 에이전트가 쌓인다.
   근거: 이번 e2e 3회로 오케스트레이터 3개와 smoke test 역할 에이전트 5개가 남았다.
+
+<!-- followup: fu-3c0b7a9e21d4 | source: agent-dashboard-tab | task: 5 | date: 2026-10-30 | status: taken | taken: 6 -->
+- 대시보드 effort 칩: effort 값(`thinkingOptionId`/`effectiveThinkingOptionId`)이 비어 있으면 provider snapshot의 모델 `defaultThinkingOptionId`를 흐리게 표시한다. Paseo 화면이 하는 방식과 같다.
+  근거: 오케스트레이터 입력창은 effort가 비어 있는데도 "Medium"을 표시했고, snapshot의 claude-opus-5-5 기본값도 medium이다. 대시보드의 claude 카드에는 effort 칩이 없다.
