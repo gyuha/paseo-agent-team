@@ -102,6 +102,8 @@ export const teamApplyRpc = defineRpc({
       orchestratorAgentId: z.string(),
       /** Planners or planner workspaces that could not be archived; the team itself was applied. */
       cleanup: z.array(z.string()),
+      /** The Claude settings file the orchestrator's `paseo run` allow rule was added to, or null when none was added. */
+      permission: z.string().nullable(),
     }),
   ]),
 });

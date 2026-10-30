@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyTeam, proposeRole, teamlessProjects, proposeTeam, readTeam, roleProposal, teamProposal } from "../server/team";
 import { workspaceLabel } from "../shared/apply-plan";
+import { CLAUDE_LOCAL_SETTINGS, needsRunPermission, PASEO_RUN_RULE } from "../shared/permissions";
 import { isSharedRole, TeamSchema, type Team } from "../shared/team";
 import { agentModeOf, validateTeam } from "../shared/validate";
 
@@ -136,6 +137,15 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     expect(again.ok && again.workspaces.every((workspace) => !workspace.created)).toBe(true);
     expect(again.ok && again.orchestratorAgentId).toBe(result.orchestratorAgentId);
     expect(again.ok && again.file).toBe(result.file);
+
+    // A Claude orchestrator with a role in an unattended mode gets the paseo run allow rule, once.
+    if (needsRunPermission(proposed, (await paseo.providers.snapshot()).entries)) {
+      expect(result.permission).toBe(join(root, CLAUDE_LOCAL_SETTINGS));
+      expect(JSON.parse(readFileSync(join(root, CLAUDE_LOCAL_SETTINGS), "utf8")).permissions.allow).toEqual([PASEO_RUN_RULE]);
+    } else {
+      expect(result.permission).toBeNull();
+    }
+    expect(again.ok && again.permission).toBeNull();
     expect((await teamlessProjects({}, { paseo })).some((project) => project.id === projectId)).toBe(false);
   }, 120_000);
 

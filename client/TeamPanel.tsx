@@ -254,6 +254,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
           {applied.data.workspaces.map((workspace) => (
             <Text key={workspace.id} style={s.text}>• {t(workspace.created ? "result.created" : "result.reused", { target: workspace.target, workspace: workspace.workspace })}</Text>
           ))}
+          {(applied.data as Applied).permission ? <Text style={s.muted}>{t("result.permission", { file: (applied.data as Applied).permission! })}</Text> : null}
           {(applied.data as Applied).cleanup.map((failure) => <Text key={failure} style={s.danger}>{t("result.cleanupFailed", { failure })}</Text>)}
           {navigation ? <Button s={s} label={t("result.openOrchestrator")} onPress={() => navigation.openAgent({ agentId: (applied.data as { orchestratorAgentId: string }).orchestratorAgentId })} /> : null}
         </View>

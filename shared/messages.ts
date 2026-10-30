@@ -59,6 +59,7 @@ export const en = {
     reused: "{{target}} → {{workspace}} (reused)",
     openOrchestrator: "Open orchestrator",
     cleanupFailed: "Could not clean up the planner: {{failure}}",
+    permission: "A role runs in an unattended mode, so the orchestrator may now start agents with paseo run: added to {{file}}",
   },
 } as const;
 
@@ -123,5 +124,6 @@ export const ko: Shape<typeof en> = {
     reused: "{{target}} → {{workspace}} (기존 재사용)",
     openOrchestrator: "오케스트레이터 열기",
     cleanupFailed: "계획 에이전트를 정리하지 못했습니다: {{failure}}",
+    permission: "무인 모드로 도는 역할이 있어서, 오케스트레이터가 paseo run으로 에이전트를 띄울 수 있게 허용했습니다: {{file}}에 추가",
   },
 };

@@ -4,6 +4,7 @@ import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { ensureWorkspaces, planWorkspaces, workspaceLabel } from "../shared/apply-plan";
 import { findOrchestrator, LABEL, PLANNER_WORKSPACE, plannerCleanup } from "../shared/cleanup";
+import { CLAUDE_LOCAL_SETTINGS, needsRunPermission, PASEO_RUN_RULE, withAllowRule } from "../shared/permissions";
 import { orchestratorPrompt, teamChangedMessage } from "../shared/prompt";
 import { extractProposal, extractRole, plannerPrompt, ROLE_JSON_SCHEMA, rolePrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
 import { plannerWorkspace, projectsWithoutTeam, type ProjectRef } from "../shared/projects";
@@ -172,6 +173,30 @@ async function archivePlanners(paseo: PaseoApi, targets: { agents: string[]; wor
   return failures;
 }
 
+/**
+ * Lets the project's Claude orchestrator start agents with `paseo run`, so its Auto-mode reviewer can't deny a role
+ * that runs unattended. Returns the settings file when the rule was added, null when it was already there.
+ */
+async function allowPaseoRun(project: ProjectRef): Promise<{ ok: true; file: string | null } | { ok: false; errors: string[] }> {
+  const file = join(project.root, CLAUDE_LOCAL_SETTINGS);
+  const text = await readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return "{}";
+    throw error;
+  });
+  let settings: unknown;
+  try {
+    settings = JSON.parse(text);
+  } catch (error) {
+    return { ok: false, errors: [`${CLAUDE_LOCAL_SETTINGS} is not valid JSON: ${(error as Error).message}`] };
+  }
+  if (typeof settings !== "object" || settings === null || Array.isArray(settings)) return { ok: false, errors: [`${CLAUDE_LOCAL_SETTINGS} is not a JSON object`] };
+  const next = withAllowRule(settings as Record<string, unknown>, PASEO_RUN_RULE);
+  if (!next) return { ok: true, file: null };
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify(next, null, 2) + "\n", "utf8");
+  return { ok: true, file };
+}
+
 export async function applyTeam({ team: input, ...target }: RpcInput<typeof teamApplyRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamApplyRpc>> {
   const checked = checkTeam(input);
   if (!checked.ok) return { ok: false, errors: checked.errors };
@@ -185,6 +210,8 @@ export async function applyTeam({ team: input, ...target }: RpcInput<typeof team
   // Teams never share a workspace, so one team's role sessions can't mix with another's.
   const clashes = workspaceClashes(team, workspacesOfOtherTeams(teams, team.orchestrator.workspace));
   if (clashes.length) return { ok: false, errors: clashes.map((problem) => `${problem.target}: ${problem.message}`) };
+  const permission = needsRunPermission(team, providers) ? await allowPaseoRun(project) : { ok: true as const, file: null };
+  if (!permission.ok) return { ok: false, errors: permission.errors };
   const relative = teamFileFor(team, teams, names);
   const file = join(project.root, relative);
   await mkdir(dirname(file), { recursive: true });
@@ -202,7 +229,7 @@ export async function applyTeam({ team: input, ...target }: RpcInput<typeof team
   const running = findOrchestrator(agents, lead.id, team, orchestratorMode);
   if (running) {
     await paseo.agents.ref(running.id).send(teamChangedMessage(team, modes, relative));
-    return { ok: true, file, workspaces, orchestratorAgentId: running.id, cleanup: await archivePlanners(paseo, plannerCleanup(existing, agents, team)) };
+    return { ok: true, file, workspaces, orchestratorAgentId: running.id, cleanup: await archivePlanners(paseo, plannerCleanup(existing, agents, team)), permission: permission.file };
   }
   const orchestrator = await paseo.workspaces.ref(lead.id).agents.create({
     config: { provider: `${team.orchestrator.provider}/${team.orchestrator.model}`, modeId: orchestratorMode, systemPrompt: orchestratorPrompt(team, modes, relative) },
@@ -210,5 +237,5 @@ export async function applyTeam({ team: input, ...target }: RpcInput<typeof team
     prompt: `Read ${relative}, then reply with a short summary of the team (role, workspace, provider/model) and say you are ready for a request. Do not start any agents yet.`,
     labels: { [LABEL]: "orchestrator" },
   });
-  return { ok: true, file, workspaces, orchestratorAgentId: orchestrator.id, cleanup: await archivePlanners(paseo, plannerCleanup(existing, agents, team)) };
+  return { ok: true, file, workspaces, orchestratorAgentId: orchestrator.id, cleanup: await archivePlanners(paseo, plannerCleanup(existing, agents, team)), permission: permission.file };
 }
