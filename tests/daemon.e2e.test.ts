@@ -7,8 +7,10 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { applyTeam, proposeRole, teamlessProjects, proposeTeam, readTeam, roleProposal, teamProposal } from "../server/team";
-import { TEAM_FILE, TeamSchema, type Team } from "../shared/team";
+import { applyTeam, proposeRole, startTeamHere, teamlessProjects, proposeTeam, readTeam, roleProposal, teamProposal } from "../server/team";
+import { workspaceLabel } from "../shared/apply-plan";
+import { orchestratorIn } from "../shared/cleanup";
+import { isSharedRole, TEAM_FILE, TeamSchema, type Team } from "../shared/team";
 import { agentModeOf, validateTeam } from "../shared/validate";
 
 describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemon", () => {
@@ -107,7 +109,8 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     if (!result.ok) throw new Error(result.errors.join("\n"));
     expect(result.cleanup).toEqual([]);
     expect(JSON.parse(readFileSync(join(root, TEAM_FILE), "utf8")).roles.length).toBe(proposed.roles.length);
-    expect(result.workspaces).toHaveLength(proposed.roles.length + 1);
+    // The planner leaves most roles without a workspace of their own, so only the others get one besides the orchestrator's.
+    expect(result.workspaces).toHaveLength(proposed.roles.filter((role) => !isSharedRole(role)).length + 1);
 
     const { entries } = await paseo.workspaces.list();
     for (const workspace of result.workspaces) {
@@ -133,4 +136,68 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     expect(again.ok && again.orchestratorAgentId).toBe(result.orchestratorAgentId);
     expect((await teamlessProjects({}, { paseo })).some((project) => project.id === projectId)).toBe(false);
   }, 120_000);
+
+  it("applies a team with a role that shares the orchestrator's workspace", async () => {
+    const template = proposed.roles[0]!;
+    const own = proposed.roles.filter((role) => !isSharedRole(role));
+    const team: Team = {
+      ...proposed,
+      roles: [...proposed.roles, { ...template, name: "shared-qa", workspace: "", folders: [], instructions: "" }, { ...template, name: "own-docs", workspace: "own-docs", folders: [], instructions: "" }],
+    };
+    const result = await applyTeam({ projectId, team }, { paseo });
+    if (!result.ok) throw new Error(result.errors.join("\n"));
+
+    // Steps exist for the orchestrator and every role with its own workspace, none for the shared role.
+    expect(result.workspaces.map((workspace) => workspace.target)).toEqual(["orchestrator", ...own.map((role) => role.name), "own-docs"]);
+    expect(result.workspaces.find((workspace) => workspace.target === "own-docs")?.created).toBe(true);
+
+    const titles = (await paseo.workspaces.list()).entries.filter((entry) => entry.projectId === projectId && !entry.archivingAt).map((entry) => workspaceLabel(entry).trim().toLowerCase());
+    expect(titles).toContain(team.orchestrator.workspace.toLowerCase());
+    expect(titles).toContain("own-docs");
+    for (const role of own) expect(titles).toContain(role.workspace.toLowerCase());
+    expect(titles).not.toContain("shared-qa");
+    expect(titles).not.toContain("");
+  }, 120_000);
+
+  it("starts an orchestrator in another workspace and tells every orchestrator when the team is applied again", async () => {
+    const projectWorkspaces = async () => (await paseo.workspaces.list()).entries.filter((entry) => entry.projectId === projectId && !entry.archivingAt);
+    const team = (await readTeam({ projectId }, { paseo })).team!;
+    const homeWorkspace = (await projectWorkspaces()).find((entry) => workspaceLabel(entry).trim().toLowerCase() === team.orchestrator.workspace.toLowerCase())!;
+    const agentsNow = async () => (await paseo.agents.list()).entries.map((entry) => entry.agent);
+    const home = orchestratorIn(await agentsNow(), homeWorkspace.id);
+    expect(home).toBeDefined();
+
+    const second = (await paseo.workspaces.create({ title: `side-${Date.now()}`, source: { kind: "directory", path: root, projectId } })).id;
+    const workspacesBefore = (await projectWorkspaces()).length;
+
+    const started = await startTeamHere({ workspaceId: second }, { paseo });
+    if (!started.ok) throw new Error(started.errors.join("\n"));
+    expect(started.created).toBe(true);
+    const orchestrator = (await paseo.agents.ref(started.orchestratorAgentId).refresh())!.agent;
+    expect(orchestrator.workspaceId).toBe(second);
+    expect(orchestrator.labels["workspace-agents"]).toBe("orchestrator");
+    expect(started.orchestratorAgentId).not.toBe(home!.id);
+    // Starting here creates no workspace.
+    expect((await projectWorkspaces()).length).toBe(workspacesBefore);
+
+    const again = await startTeamHere({ workspaceId: second }, { paseo });
+    expect(again).toEqual({ ok: true, orchestratorAgentId: started.orchestratorAgentId, created: false });
+
+    // Applying the same team sends a message to the orchestrator in each workspace; the agent snapshot's lastUserMessageAt shows it.
+    const lastUserMessage = async (id: string) => {
+      const at = (await paseo.agents.ref(id).refresh())?.agent.lastUserMessageAt;
+      return at ? Date.parse(at) : 0;
+    };
+    const before = { home: await lastUserMessage(home!.id), second: await lastUserMessage(started.orchestratorAgentId) };
+    const applied = await applyTeam({ projectId, team }, { paseo });
+    if (!applied.ok) throw new Error(applied.errors.join("\n"));
+    expect(applied.orchestratorAgentId).toBe(home!.id);
+    let after = { home: before.home, second: before.second };
+    for (let attempt = 0; attempt < 20 && !(after.home > before.home && after.second > before.second); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      after = { home: await lastUserMessage(home!.id), second: await lastUserMessage(started.orchestratorAgentId) };
+    }
+    expect(after.home).toBeGreaterThan(before.home);
+    expect(after.second).toBeGreaterThan(before.second);
+  }, 180_000);
 });

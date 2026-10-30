@@ -1,4 +1,4 @@
-import type { Team } from "./team";
+import { isSharedRole, type Team } from "./team";
 
 /** The part of a Paseo workspace descriptor that matching needs. */
 export interface WorkspaceRef {
@@ -23,12 +23,12 @@ export function workspaceLabel(workspace: WorkspaceRef): string {
 
 const key = (label: string) => label.trim().toLowerCase();
 
-/** Matches each team workspace to an existing one of the project by title, or marks it for creation. */
+/** Matches each team workspace to an existing one of the project by title, or marks it for creation; shared roles get none. */
 export function planWorkspaces(team: Team, existing: readonly WorkspaceRef[]): WorkspaceStep[] {
   const find = (title: string) => existing.find((workspace) => key(workspaceLabel(workspace)) === key(title))?.id ?? null;
   return [
     { target: "orchestrator", workspace: team.orchestrator.workspace, existingId: find(team.orchestrator.workspace) },
-    ...team.roles.map((role) => ({ target: role.name, workspace: role.workspace, existingId: find(role.workspace) })),
+    ...team.roles.filter((role) => !isSharedRole(role)).map((role) => ({ target: role.name, workspace: role.workspace, existingId: find(role.workspace) })),
   ];
 }
 

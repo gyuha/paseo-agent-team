@@ -15,7 +15,8 @@ export const OrchestratorSchema = z.object({
 
 export const RoleSchema = z.object({
   name,
-  workspace: name,
+  /** Workspace title, or empty to share the orchestrator's workspace. */
+  workspace: z.string().trim().default(""),
   provider: name,
   model: name,
   folders: z.array(z.string().trim().min(1)).default([]),
@@ -38,6 +39,7 @@ export const TeamSchema = z
     });
     const workspaces = new Set([team.orchestrator.workspace.toLowerCase()]);
     team.roles.forEach((role, index) => {
+      if (isSharedRole(role)) return;
       const key = role.workspace.toLowerCase();
       if (workspaces.has(key)) ctx.addIssue({ code: "custom", path: ["roles", index, "workspace"], message: `workspace "${role.workspace}" is used more than once` });
       workspaces.add(key);
@@ -46,6 +48,11 @@ export const TeamSchema = z
 
 export type Team = z.output<typeof TeamSchema>;
 export type Role = z.output<typeof RoleSchema>;
+
+/** A role without its own workspace runs its sessions in the orchestrator's. */
+export function isSharedRole(role: { workspace: string }): boolean {
+  return role.workspace.trim() === "";
+}
 
 export type ParseResult = { ok: true; team: Team } | { ok: false; errors: string[] };
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractProposal, plannerPrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
+import { extractProposal, plannerPrompt, ROLE_JSON_SCHEMA, TEAM_JSON_SCHEMA } from "../shared/proposal";
 import type { ProviderInfo } from "../shared/validate";
 
 const catalog: ProviderInfo[] = [
@@ -36,11 +36,33 @@ describe("plannerPrompt", () => {
   it("forbids changing files", () => {
     expect(prompt).toMatch(/do not (create|change|edit)/i);
   });
+
+  it("shows roles with an empty workspace in the example", () => {
+    const example = JSON.parse(prompt.slice(prompt.indexOf("{"), prompt.lastIndexOf("}") + 1));
+    expect(example.roles[0].workspace).toBe("");
+  });
+
+  it("tells the planner to leave workspaces empty unless a role needs a separate one", () => {
+    expect(prompt).toMatch(/empty string/);
+    expect(prompt).toMatch(/orchestrator's workspace/);
+    expect(prompt).toMatch(/separate/);
+  });
 });
 
 describe("TEAM_JSON_SCHEMA", () => {
   it("requires the fields the team file needs", () => {
     expect(TEAM_JSON_SCHEMA.required).toEqual(["version", "goal", "orchestrator", "roles"]);
+  });
+
+  it("keeps a role's workspace required but lets it be an empty string", () => {
+    const role = TEAM_JSON_SCHEMA.properties.roles.items;
+    expect(role.required).toContain("workspace");
+    expect(role.properties.workspace).toEqual({ type: "string" });
+    expect(ROLE_JSON_SCHEMA.properties.workspace).toEqual({ type: "string" });
+  });
+
+  it("still requires the orchestrator's workspace to be non-empty", () => {
+    expect(TEAM_JSON_SCHEMA.properties.orchestrator.properties.workspace).toEqual({ type: "string", minLength: 1 });
   });
 });
 
@@ -52,6 +74,11 @@ describe("extractProposal", () => {
   it("parses JSON wrapped in a code fence with text around it", () => {
     const text = "Here is the team:\n```json\n" + JSON.stringify(proposal, null, 2) + "\n```\nDone.";
     expect(extractProposal(text).ok).toBe(true);
+  });
+
+  it("accepts a proposal whose roles have an empty workspace", () => {
+    const shared = { ...proposal, roles: [{ ...proposal.roles[0], workspace: "" }] };
+    expect(extractProposal(JSON.stringify(shared))).toMatchObject({ ok: true, team: { roles: [{ workspace: "" }] } });
   });
 
   it("fails clearly when there is no answer", () => {

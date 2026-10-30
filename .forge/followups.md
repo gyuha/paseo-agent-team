@@ -24,3 +24,7 @@
 <!-- followup: fu-3c0b7a9e21d4 | source: agent-dashboard-tab | task: 5 | date: 2026-10-30 | status: taken | taken: 6 -->
 - 대시보드 effort 칩: effort 값(`thinkingOptionId`/`effectiveThinkingOptionId`)이 비어 있으면 provider snapshot의 모델 `defaultThinkingOptionId`를 흐리게 표시한다. Paseo 화면이 하는 방식과 같다.
   근거: 오케스트레이터 입력창은 effort가 비어 있는데도 "Medium"을 표시했고, snapshot의 claude-opus-5-5 기본값도 medium이다. 대시보드의 claude 카드에는 effort 칩이 없다.
+
+<!-- followup: fu-9d41c6a2e7b0 | source: per-workspace-orchestrator | task: 9 | date: 2026-10-30 | status: open | taken: - -->
+- e2e가 만든 임시 `pwa-game-*` 프로젝트의 워크스페이스는 보관되지 않아 사이드바에 쌓인다(에이전트는 보관됨). e2e의 `afterAll`에서 임시 워크스페이스도 보관한다.
+  근거: UAT 중 사이드바에 `pwa-game-*` 프로젝트가 4개 이상 보였다.

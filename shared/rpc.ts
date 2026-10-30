@@ -79,6 +79,16 @@ export const teamRoleProposalRpc = defineRpc({
   ]),
 });
 
+/** Starts the team's orchestrator in this workspace, or reuses the one already there. */
+export const teamStartHereRpc = defineRpc({
+  name: "team.start-here",
+  input: z.object({ workspaceId: z.string() }),
+  output: z.discriminatedUnion("ok", [
+    z.object({ ok: z.literal(false), errors: z.array(z.string()) }),
+    z.object({ ok: z.literal(true), orchestratorAgentId: z.string(), created: z.boolean() }),
+  ]),
+});
+
 const AppliedWorkspaceSchema = z.object({ target: z.string(), workspace: z.string(), id: z.string(), created: z.boolean() });
 
 /** Writes the team file, creates missing workspaces, starts the orchestrator and archives the planners. */

@@ -19,10 +19,15 @@ describe("parseFolders / foldersText", () => {
 
 describe("newRole", () => {
   it("uses the first ready provider and its first model, with a name not already taken", () => {
-    expect(newRole(catalog, ["role-1"])).toEqual({ name: "role-2", workspace: "role-2", provider: "codex", model: "gpt-6.1-sol", folders: [], instructions: "" });
+    expect(newRole(catalog, ["role-1"])).toEqual({ name: "role-2", workspace: "", provider: "codex", model: "gpt-6.1-sol", folders: [], instructions: "" });
   });
 
   it("leaves provider and model empty when nothing is ready", () => {
     expect(newRole([], [])).toMatchObject({ name: "role-1", provider: "", model: "" });
+  });
+
+  it("leaves the workspace empty so the role shares the orchestrator's", () => {
+    expect(newRole(catalog, []).workspace).toBe("");
+    expect(newRole([], []).workspace).toBe("");
   });
 });

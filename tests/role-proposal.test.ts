@@ -35,6 +35,14 @@ describe("rolePrompt", () => {
     expect(prompt).toContain('"orchestrator"');
   });
 
+  it("shows an empty workspace in the example and explains when to use a separate one", () => {
+    const example = JSON.parse(prompt.slice(prompt.indexOf("{"), prompt.lastIndexOf("}") + 1));
+    expect(example.workspace).toBe("");
+    expect(prompt).toMatch(/empty string/);
+    expect(prompt).toMatch(/orchestrator's workspace/);
+    expect(prompt).toMatch(/separate/);
+  });
+
   it("forbids file changes and shows the exact JSON shape of one role", () => {
     expect(prompt).toMatch(/Do not create, change or delete any file/);
     const example = JSON.parse(prompt.slice(prompt.indexOf("{"), prompt.lastIndexOf("}") + 1));
@@ -45,6 +53,22 @@ describe("rolePrompt", () => {
 describe("ROLE_JSON_SCHEMA", () => {
   it("requires every role field", () => {
     expect(ROLE_JSON_SCHEMA.required).toEqual(["name", "workspace", "provider", "model", "folders", "instructions"]);
+  });
+
+  it("allows an empty workspace string", () => {
+    expect(ROLE_JSON_SCHEMA.properties.workspace).toEqual({ type: "string" });
+  });
+});
+
+describe("extractRole with a shared role", () => {
+  it("accepts an empty workspace", () => {
+    const shared = { ...role, workspace: "" };
+    expect(extractRole(JSON.stringify(shared))).toEqual({ ok: true, role: shared });
+  });
+
+  it("defaults a missing workspace to an empty string", () => {
+    const { workspace: _omit, ...withoutWorkspace } = role;
+    expect(extractRole(JSON.stringify(withoutWorkspace))).toEqual({ ok: true, role: { ...role, workspace: "" } });
   });
 });
 

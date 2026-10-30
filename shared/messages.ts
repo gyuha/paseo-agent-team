@@ -22,6 +22,10 @@ export const en = {
     orchestrator: "Orchestrator: {{workspace}} · {{model}}",
     edit: "Edit",
     reapply: "Apply again",
+    startHere: "Start the team here",
+    startingHere: "Starting the team…",
+    startedHere: "Orchestrator started.",
+    reusedHere: "Existing orchestrator reused.",
   },
   create: {
     intro: "Create a team: describe the goal and a planner agent proposes a provider and model for each role.",
@@ -44,6 +48,7 @@ export const en = {
   role: {
     name: "Role name",
     workspace: "Workspace name",
+    sharedWorkspace: "Shared with orchestrator",
     remove: "Remove",
     folders: "Folders (comma-separated, empty for no limit)",
     instructions: "Instructions",
@@ -82,6 +87,10 @@ export const ko: Shape<typeof en> = {
     orchestrator: "오케스트레이터: {{workspace}} · {{model}}",
     edit: "편집",
     reapply: "다시 적용",
+    startHere: "이 워크스페이스에서 팀 시작",
+    startingHere: "팀을 시작하는 중…",
+    startedHere: "오케스트레이터를 시작했습니다.",
+    reusedHere: "기존 오케스트레이터를 재사용했습니다.",
   },
   create: {
     intro: "팀 만들기: 목표를 적으면 계획 에이전트가 역할별 provider/모델을 제안합니다.",
@@ -104,6 +113,7 @@ export const ko: Shape<typeof en> = {
   role: {
     name: "역할 이름",
     workspace: "workspace 이름",
+    sharedWorkspace: "오케스트레이터와 공유",
     remove: "삭제",
     folders: "담당 폴더 (쉼표로 구분, 비우면 제한 없음)",
     instructions: "지시",

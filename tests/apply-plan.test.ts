@@ -50,6 +50,27 @@ describe("planWorkspaces", () => {
   });
 });
 
+describe("planWorkspaces with shared roles", () => {
+  const sharedTeam: Team = { ...team, roles: [team.roles[0]!, { name: "qa", workspace: "", provider: "claude", model: "claude-sonnet-5-5", folders: [], instructions: "" }, { name: "docs", workspace: "  ", provider: "claude", model: "claude-haiku-5-5", folders: [], instructions: "" }] };
+
+  it("emits no step for roles without a workspace", () => {
+    expect(planWorkspaces(sharedTeam, [])).toEqual([
+      { target: "orchestrator", workspace: "orchestrator", existingId: null },
+      { target: "design", workspace: "Design", existingId: null },
+    ]);
+  });
+
+  it("does not match shared roles against existing workspaces", () => {
+    const existing = [{ id: "wks_blank", name: "main", title: " " }, { id: "wks_b", name: "orchestrator", title: null }];
+    expect(planWorkspaces(sharedTeam, existing).map((step) => step.target)).toEqual(["orchestrator", "design"]);
+  });
+
+  it("plans only the orchestrator when every role is shared", () => {
+    const allShared: Team = { ...sharedTeam, roles: sharedTeam.roles.slice(1) };
+    expect(planWorkspaces(allShared, [])).toEqual([{ target: "orchestrator", workspace: "orchestrator", existingId: null }]);
+  });
+});
+
 describe("ensureWorkspaces", () => {
   it("creates missing workspaces orchestrator-last, so Paseo's sidebar shows it on top, and returns them orchestrator-first", async () => {
     const created: string[] = [];

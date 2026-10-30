@@ -8,7 +8,7 @@ export const ROLE_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: ["name", "workspace", "provider", "model", "folders", "instructions"],
-  properties: { name: text, workspace: text, provider: text, model: text, folders: { type: "array", items: text }, instructions: { type: "string" } },
+  properties: { name: text, workspace: { type: "string" }, provider: text, model: text, folders: { type: "array", items: text }, instructions: { type: "string" } },
 };
 
 /** The planner agent's `outputSchema`: a complete team file, every field present. */
@@ -31,7 +31,7 @@ export const TEAM_JSON_SCHEMA = {
 
 // outputSchema isn't enforced by every provider (Claude answered with its own key names),
 // so the prompt shows the exact shape too.
-const ROLE_EXAMPLE = { name: "<role>", workspace: "<role>", provider: "<provider id>", model: "<model id>", folders: ["<relative/path>"], instructions: "<what this role does>" };
+const ROLE_EXAMPLE = { name: "<role>", workspace: "", provider: "<provider id>", model: "<model id>", folders: ["<relative/path>"], instructions: "<what this role does>" };
 const EXAMPLE = {
   version: 1,
   goal: "<the goal>",
@@ -69,7 +69,8 @@ export function plannerPrompt(goal: string, catalog: readonly ProviderInfo[]): s
     "Rules:",
     "- Look around the repository to fit roles and folders to what is there. Do not create, change or delete any file.",
     "- Pick 2 to 6 roles that do clearly separate work. Prefer different providers where they suit the work better (for example one provider for visual design, another for audio).",
-    "- Give each role a short lowercase name, the same short lowercase workspace, the folders it owns (relative paths, may be empty), and one or two sentences of instructions.",
+    "- Give each role a short lowercase name, the folders it owns (relative paths, may be empty), and one or two sentences of instructions.",
+    "- Leave a role's workspace as an empty string so its sessions run in the orchestrator's workspace. Give a role its own short lowercase workspace only when it needs a separate one, and then make it differ from the others.",
     '- The orchestrator gets the workspace "orchestrator" and a strong reasoning model.',
     "- Set version to 1 and goal to the goal above.",
     "- Answer with JSON only, using exactly these keys and no others:",
@@ -91,7 +92,7 @@ export interface TeamOutline {
 
 /** Asks a planner agent for one more role matching the description, using only models this host can run. */
 export function rolePrompt(description: string, team: TeamOutline, catalog: readonly ProviderInfo[]): string {
-  const roles = team.roles.map((role) => `- ${role.name} (workspace ${role.workspace}, folders ${role.folders.length ? role.folders.join(", ") : "any"})`);
+  const roles = team.roles.map((role) => `- ${role.name} (workspace ${role.workspace.trim() || "shared with the orchestrator"}, folders ${role.folders.length ? role.folders.join(", ") : "any"})`);
   return [
     "Propose one more role for this project's agent team in Paseo. The role gets its own Paseo workspace and runs on its own provider and model; an orchestrator hands work to it.",
     "",
@@ -105,7 +106,8 @@ export function rolePrompt(description: string, team: TeamOutline, catalog: read
     "",
     "Rules:",
     "- Look around the repository to fit the role's folders to what is there. Do not create, change or delete any file.",
-    "- Use a short lowercase name and the same short lowercase workspace, both different from the existing roles and the orchestrator's workspace.",
+    "- Use a short lowercase name different from the existing roles.",
+    "- Leave the workspace as an empty string so its sessions run in the orchestrator's workspace. Give it its own short lowercase workspace only when it needs a separate one, and then make it differ from the existing workspaces and the orchestrator's.",
     "- Give it the folders it owns (relative paths, may be empty), avoiding folders other roles own, and one or two sentences of instructions.",
     "- Pick the provider and model that suit this work best.",
     "- Answer with JSON only, using exactly these keys and no others:",

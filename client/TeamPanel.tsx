@@ -1,13 +1,14 @@
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { useRpc, useTranslation } from "@getpaseo/plugin/client";
+import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { LABEL } from "../shared/cleanup";
 import { foldersText, newRole, parseFolders } from "../shared/draft";
 import { messages } from "./i18n";
-import { teamApplyRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRoleProposalRpc, teamRoleProposeRpc } from "../shared/rpc";
-import { checkTeam, type Role, type Team } from "../shared/team";
+import { teamApplyRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRoleProposalRpc, teamRoleProposeRpc, teamStartHereRpc } from "../shared/rpc";
+import { checkTeam, isSharedRole, type Role, type Team } from "../shared/team";
 import { validateTeam, type ProviderInfo } from "../shared/validate";
 
 type Colors = PluginWorkspacePanelProps["theme"]["colors"];
@@ -77,7 +78,7 @@ function RoleEditor({ s, role, catalog, onChange, onRemove }: { s: Styles; role:
     <View style={s.card}>
       <View style={s.row}>
         <TextInput style={[s.input, { flex: 1 }]} value={role.name} placeholder={t("role.name")} onChangeText={(name) => onChange({ ...role, name })} />
-        <TextInput style={[s.input, { flex: 1 }]} value={role.workspace} placeholder={t("role.workspace")} onChangeText={(workspace) => onChange({ ...role, workspace })} />
+        <TextInput style={[s.input, { flex: 1 }]} value={role.workspace} placeholder={t("role.sharedWorkspace")} onChangeText={(workspace) => onChange({ ...role, workspace })} />
         <Button s={s} secondary label={t("role.remove")} onPress={onRemove} />
       </View>
       <ModelPicker s={s} catalog={catalog} provider={role.provider} model={role.model} onChange={(next) => onChange({ ...role, ...next })} />
@@ -93,6 +94,42 @@ function RoleEditor({ s, role, catalog, onChange, onRemove }: { s: Styles; role:
       <TextInput style={s.input} value={role.instructions} placeholder={t("role.instructions")} multiline onChangeText={(instructions) => onChange({ ...role, instructions })} />
     </View>
   );
+}
+
+function StartHere({ workspaceId, navigation, s }: { workspaceId: string; navigation: PluginScreenProps["navigation"]; s: Styles }) {
+  const paseo = usePaseo();
+  const queryClient = useQueryClient();
+  const { t } = useTranslation(messages);
+  const startHere = useRpc(teamStartHereRpc);
+  const key = ["workspace-agents", "orchestrators", workspaceId] as const;
+  const agents = useQuery({ queryKey: key, queryFn: () => paseo.agents.list() });
+  useEffect(() => {
+    const unsubscribe = paseo.agents.subscribe(() => void queryClient.invalidateQueries({ queryKey: ["workspace-agents", "orchestrators", workspaceId] }));
+    let active = true;
+    let release: (() => void) | undefined;
+    void paseo.agents.list({ subscribe: {} }).then(({ subscription }) => {
+      if (active) release = () => { void subscription.release(); };
+      else void subscription.release();
+    }).catch(() => {});
+    return () => { active = false; unsubscribe(); release?.(); };
+  }, [paseo, queryClient, workspaceId]);
+  const started = useMutation({
+    mutationFn: () => startHere({ workspaceId }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: key }),
+  });
+  const startedAgentId = started.data?.ok ? started.data.orchestratorAgentId : null;
+  const hasOrchestrator = agents.data?.entries.some(({ agent }) => agent.workspaceId === workspaceId && !agent.archivedAt && agent.labels[LABEL] === "orchestrator");
+  return <>
+    {agents.data && !hasOrchestrator && !started.data?.ok ? <Button s={s} secondary label={t("current.startHere")} disabled={started.isPending} onPress={() => started.mutate()} /> : null}
+    {started.isPending ? <Text style={s.muted}>{t("current.startingHere")}</Text> : null}
+    {agents.error ? <Text style={s.danger}>{String(agents.error)}</Text> : null}
+    {started.error ? <Text style={s.danger}>{String(started.error)}</Text> : null}
+    {started.data && !started.data.ok ? started.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
+    {started.data?.ok ? <>
+      <Text style={s.success}>{t(started.data.created ? "current.startedHere" : "current.reusedHere")}</Text>
+      {navigation && startedAgentId ? <Button s={s} secondary label={t("result.openOrchestrator")} onPress={() => navigation.openAgent({ agentId: startedAgentId })} /> : null}
+    </> : null}
+  </>;
 }
 
 /** Where the team goes: a workspace's project, or a project picked without a workspace. */
@@ -185,12 +222,13 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
         <View style={s.card}>
           <Text style={s.text}>{t("current.orchestrator", { workspace: data.team.orchestrator.workspace, model: `${data.team.orchestrator.provider}/${data.team.orchestrator.model}` })}</Text>
           {data.team.roles.map((role) => (
-            <Text key={role.name} style={s.text}>• {role.name} → {role.workspace} · {role.provider}/{role.model}{role.folders.length ? ` · ${role.folders.join(", ")}` : ""}</Text>
+            <Text key={role.name} style={s.text}>• {role.name} → {isSharedRole(role) ? t("role.sharedWorkspace") : role.workspace} · {role.provider}/{role.model}{role.folders.length ? ` · ${role.folders.join(", ")}` : ""}</Text>
           ))}
           {data.validation.map((error) => <Text key={error.target + error.message} style={s.danger}>{error.target}: {error.message}</Text>)}
           <View style={s.row}>
             <Button s={s} label={t("current.edit")} onPress={() => setDraft(data.team)} />
             <Button s={s} secondary label={t("current.reapply")} disabled={applied.isPending} onPress={() => applied.mutate(data.team!)} />
+            {"workspaceId" in target ? <StartHere key={target.workspaceId} workspaceId={target.workspaceId} navigation={navigation} s={s} /> : null}
           </View>
         </View>
       ) : null}

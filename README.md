@@ -53,7 +53,7 @@ Open a workspace in the project you want a team for, then:
 
 To skip the planner, press **Start with an empty team** and fill in the roles yourself.
 
-Applying does four things in order. It writes `.agents/team.json`, makes sure every role has a workspace, starts the orchestrator, and cleans up the planners. An existing workspace with the same title is reused, and a missing one is created in the project. If an orchestrator is already running in its workspace on the same provider, model and mode, it is kept and told to re-read the team instead of starting a second one. If any of the three differs, a new orchestrator starts and the old one keeps running; it is not archived.
+Applying does four things in order. It writes `.agents/team.json`, makes sure every role that has its own workspace has one, starts the orchestrator, and cleans up the planners. An existing workspace with the same title is reused, and a missing one is created in the project. Applying again tells every running orchestrator in the project to re-read the team instead of starting a second one; none is archived. A role whose workspace is empty gets none and runs in the orchestrator's workspace. If a role is switched from its own workspace to shared, Apply leaves the old workspace and its sessions alone; archive them yourself if you no longer need them.
 
 Cleanup archives every planner agent left in the project, including ones from proposals you cancelled. A `Team planner` workspace is archived too, but only when the team doesn't use it and no other agent is left in it. If cleanup fails, the team is still applied and the failure is shown as a warning.
 
@@ -91,7 +91,7 @@ Press **Open orchestrator** after applying, or find the agent titled **Orchestra
 
 > Redesign the title screen and add jump and coin sounds. Report back when both are done.
 
-The orchestrator splits the request by role, starts each role's agent in that role's workspace with that role's provider and model, and continues with an existing agent there instead of starting a new one. It waits for the results and summarizes what each role did. The role agents show up under their workspaces in Paseo's sidebar, where you can watch them or talk to them directly.
+The orchestrator splits the request by role, starts each role's agent in that role's workspace (the orchestrator's workspace for a role without its own) with that role's provider and model, and continues with an existing agent there, found by its `role=<name>` label, instead of starting a new one. It waits for the results and summarizes what each role did. The role agents show up under their workspaces in Paseo's sidebar, where you can watch them or talk to them directly.
 
 ```
 Your request → Orchestrator splits it by role → each role's agent works in its own workspace → Orchestrator waits and reports
@@ -110,6 +110,10 @@ The **Agent dashboard** workspace panel (**에이전트 대시보드** in Korean
 The capture shows the orchestrator as the root card, with four role agents under it. `core` and `ui` are running: their cards glow softly, and command packets travel from the orchestrator along the path to them, flashing each card on arrival. `tests` and `release` have finished and show ✓.
 
 Each card shows the provider logo, the role or caption, the title, and the model, effort (thinking option) and permission mode chips. When an agent has no effort set, its effort chip shows the model's default effort from the provider, dimmed. The badge is **!** when the agent is waiting for a permission or has failed, an amber pulsing dot while it runs, and ✓ when it has finished. Lines to running agents turn into animated red dashes with moving signal dots. An agent that is not running itself but has a running agent below it, such as an orchestrator waiting on its role agents, gets an amber border without the glow. Press a card to open that agent. Closed and archived agents are hidden unless **Show closed** is on.
+
+### 5. Start the team here
+
+In the **Agent team** panel of any workspace in the project, press **Start the team here** (**이 워크스페이스에서 팀 시작** in Korean) to start an orchestrator in that workspace from the same `.agents/team.json`. The button appears only while that workspace has no orchestrator yet. This team runs every role as a shared session inside that workspace, even for roles that have their own workspace in the team file. Only the default team, in the orchestrator's workspace, uses the role workspaces.
 
 ## Team definition format
 
@@ -149,7 +153,7 @@ Each card shows the provider logo, the role or caption, the title, and the model
 | `orchestrator.provider`, `.model` | yes | Provider ID and model ID, as listed by `paseo provider models <provider>`. |
 | `roles[]` | yes | At least one role. |
 | `roles[].name` | yes | Unique, case-insensitive. |
-| `roles[].workspace` | yes | Workspace title. Each workspace, including the orchestrator's, may be used only once. |
+| `roles[].workspace` | no | Workspace title. Empty means the role shares the orchestrator's workspace, and its sessions are found there by the `role=<name>` label. A title set here may be used only once, including the orchestrator's. New proposals and roles added in the editor leave it empty. |
 | `roles[].provider`, `.model` | yes | Must be ready on the host when you apply. |
 | `roles[].folders` | no | Folders the role owns. Empty means no limit. The orchestrator keeps roles inside them and runs overlapping work one after another. |
 | `roles[].instructions` | no | Extra guidance for that role. |
@@ -161,6 +165,7 @@ The plugin's UI follows Paseo's app language. English is the default and Korean 
 ## Limitations
 
 - A role's model applies to agents started by the orchestrator or this plugin. Agents you start yourself in a role's workspace from Paseo's own UI still use whatever model you pick there.
+- A role without its own workspace runs its sessions in the orchestrator's workspace, so its agents sit beside the orchestrator there. Switching a role from its own workspace to shared does not archive the old workspace or its sessions.
 - Role workspaces are local workspaces of the same checkout, so they share one folder. Keep roles to separate folders, or have the orchestrator run overlapping work in sequence.
 - The planner, the orchestrator and the role agents start in the provider's reviewed auto mode when it has one: Codex's Auto-review (`auto-review`), otherwise an `auto` mode such as Claude's Auto mode (`auto`). Only a provider with neither uses its unattended mode: the one marked unattended, otherwise the one Paseo marks dangerous, such as Antigravity's Full access. Otherwise they use the default mode. The unattended mode keeps running without asking you; Auto mode and Auto-review route permission requests through an automatic reviewer instead. The planner is told not to change files but is not technically prevented from doing so.
 - Paseo's sidebar puts a workspace it hasn't seen yet at the top of its project, so a new team lists the orchestrator first and the roles in team order. A workspace you already have keeps its place, so after applying a changed team, workspaces created for new roles appear above the orchestrator; drag them into place. The plugin cannot set the sidebar order.
