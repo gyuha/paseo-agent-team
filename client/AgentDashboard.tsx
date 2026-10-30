@@ -187,6 +187,7 @@ function Card(props: TreeProps & { root?: boolean }) {
                   paddingHorizontal: 5,
                   paddingVertical: 2,
                   maxWidth: "100%",
+                  opacity: i === 1 && node.effortDefault ? 0.55 : 1,
                 }}
               >
                 <Text
@@ -791,6 +792,18 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
     queryKey: ["dashboard", "providers"],
     queryFn: () => paseo.providers.snapshot(),
   });
+  const defaultEfforts = useMemo(() => {
+    const defaults: Record<string, string> = {};
+    for (const entry of providers.data?.entries ?? []) {
+      for (const model of entry.models ?? []) {
+        if (model.defaultThinkingOptionId) {
+          defaults[`${entry.provider}/${model.id}`] =
+            model.defaultThinkingOptionId;
+        }
+      }
+    }
+    return defaults;
+  }, [providers.data]);
   const forest = useMemo(() => {
     const entries = workspaces.data?.entries ?? [];
     const projectId = entries.find(
@@ -802,9 +815,9 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
     return buildAgentForest(
       agents.data?.entries.map((entry) => entry.agent) ?? [],
       ids,
-      state,
+      { ...state, defaultEfforts },
     );
-  }, [agents.data, workspaces.data, props.workspaceId, state]);
+  }, [agents.data, workspaces.data, props.workspaceId, state, defaultEfforts]);
   const icons = useMemo(
     () =>
       new Map(

@@ -333,6 +333,64 @@ describe("delegating", () => {
   });
 });
 
+describe("default effort", () => {
+  const scope = ["wks_a"];
+  const defaultEfforts = { "claude/claude-opus-5-5": "high" };
+  const forest = (agents: DashboardAgent[], efforts: Record<string, string> | undefined = defaultEfforts) => buildAgentForest(agents, scope, { showClosed: false, defaultEfforts: efforts });
+
+  it("fills an empty effort with the provider/model default and flags it", () => {
+    const { solo } = forest([agent("a")]);
+    expect(solo[0]!.effort).toBe("high");
+    expect(solo[0]!.effortDefault).toBe(true);
+  });
+
+  it("keeps an explicit thinkingOptionId", () => {
+    const { solo } = forest([agent("a", { thinkingOptionId: "low" })]);
+    expect(solo[0]!.effort).toBe("low");
+    expect(solo[0]!.effortDefault).toBe(false);
+  });
+
+  it("keeps an explicit effectiveThinkingOptionId", () => {
+    const { solo } = forest([agent("a", { effectiveThinkingOptionId: "medium", thinkingOptionId: "low" })]);
+    expect(solo[0]!.effort).toBe("medium");
+    expect(solo[0]!.effortDefault).toBe(false);
+  });
+
+  it("leaves effort null when no default matches the provider/model", () => {
+    const { solo } = forest([agent("a", { model: "other" }), agent("b", { provider: "codex" }), agent("c", { model: null })]);
+    for (const node of solo) {
+      expect(node.effort).toBeNull();
+      expect(node.effortDefault).toBe(false);
+    }
+  });
+
+  it("leaves effort null without any defaults", () => {
+    expect(forest([agent("a")], {}).solo[0]).toMatchObject({ effort: null, effortDefault: false });
+    expect(buildAgentForest([agent("a")], scope, { showClosed: false }).solo[0]).toMatchObject({ effort: null, effortDefault: false });
+  });
+
+  it("applies at every depth of the tree", () => {
+    const { trees } = forest([agent("p"), child("c", "p"), child("g", "c", { thinkingOptionId: "low" }), child("h", "c")]);
+    const mid = trees[0]!.children[0]!;
+    expect(trees[0]).toMatchObject({ effort: "high", effortDefault: true });
+    expect(mid).toMatchObject({ effort: "high", effortDefault: true });
+    const [explicit, filled] = mid.children;
+    expect(explicit).toMatchObject({ effort: "low", effortDefault: false });
+    expect(filled).toMatchObject({ effort: "high", effortDefault: true });
+  });
+
+  it("looks each agent up by its own provider/model", () => {
+    const efforts = { "claude/claude-opus-5-5": "high", "codex/gpt-6.1-sol": "xhigh" };
+    const { trees } = forest([agent("p"), child("c", "p", { provider: "codex", model: "gpt-6.1-sol" })], efforts);
+    expect(trees[0]!.effort).toBe("high");
+    expect(trees[0]!.children[0]!.effort).toBe("xhigh");
+  });
+
+  it("does not change agentNode called on its own", () => {
+    expect(agentNode(agent("a"))).toMatchObject({ effort: null, effortDefault: false });
+  });
+});
+
 describe("PROVIDER_LOGOS", () => {
   it.each(["claude", "codex", "copilot"])("has an inline svg for %s", (provider) => {
     const svg = PROVIDER_LOGOS[provider];

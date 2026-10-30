@@ -32,6 +32,8 @@ export interface AgentNode {
   title: string;
   model: string | null;
   effort: string | null;
+  /** The effort is the model's default, not one set on the agent. */
+  effortDefault: boolean;
   mode: string | null;
   badge: AgentBadge;
   live: boolean;
@@ -69,15 +71,18 @@ function badgeOf(agent: DashboardAgent): AgentBadge {
   return null;
 }
 
-export function agentNode(agent: DashboardAgent, children: AgentNode[] = []): AgentNode {
+/** `defaultEffort` is the model's default thinking option, shown when the agent sets none. */
+export function agentNode(agent: DashboardAgent, children: AgentNode[] = [], defaultEffort?: string): AgentNode {
   const live = agent.status === "running";
+  const effort = agent.effectiveThinkingOptionId ?? agent.thinkingOptionId ?? null;
   return {
     agent,
     kind: kindOf(agent),
     role: agent.labels.role ?? null,
     title: agent.title?.trim() || agent.id.slice(0, 7),
     model: agent.model ?? null,
-    effort: agent.effectiveThinkingOptionId ?? agent.thinkingOptionId ?? null,
+    effort: effort ?? defaultEffort ?? null,
+    effortDefault: effort === null && defaultEffort !== undefined,
     mode: agent.currentModeId ?? null,
     badge: badgeOf(agent),
     live,
@@ -92,7 +97,7 @@ const newestFirst = (a: AgentNode, b: AgentNode) => b.agent.createdAt.localeComp
  * The agents in the given workspaces as parent → child trees. A child whose parent is not shown becomes a root,
  * and so does an agent caught in a parent cycle.
  */
-export function buildAgentForest(agents: readonly DashboardAgent[], workspaceIds: readonly string[], options: { showClosed: boolean }): AgentForest {
+export function buildAgentForest(agents: readonly DashboardAgent[], workspaceIds: readonly string[], options: { showClosed: boolean; defaultEfforts?: Record<string, string> }): AgentForest {
   const workspaces = new Set(workspaceIds);
   const scope = agents.filter((agent) => workspaces.has(agent.workspaceId ?? "") && (options.showClosed || !isHidden(agent)));
   const byId = new Map(scope.map((agent) => [agent.id, agent]));
@@ -111,7 +116,8 @@ export function buildAgentForest(agents: readonly DashboardAgent[], workspaceIds
     if (isChild(agent)) children.set(parentOf(agent)!, [...(children.get(parentOf(agent)!) ?? []), agent]);
     else roots.push(agent);
   }
-  const build = (agent: DashboardAgent): AgentNode => agentNode(agent, (children.get(agent.id) ?? []).map(build).sort((a, b) => -newestFirst(a, b)));
+  const build = (agent: DashboardAgent): AgentNode =>
+    agentNode(agent, (children.get(agent.id) ?? []).map(build).sort((a, b) => -newestFirst(a, b)), options.defaultEfforts?.[`${agent.provider}/${agent.model}`]);
   const nodes = roots.map(build);
   const trees = nodes.filter((node) => node.children.length).sort((a, b) => Number(b.kind === "orchestrator") - Number(a.kind === "orchestrator") || newestFirst(a, b));
   return { trees, solo: nodes.filter((node) => !node.children.length).sort(newestFirst) };
