@@ -45,6 +45,11 @@ describe("orchestratorPrompt", () => {
     expect(prompt).toMatch(/wait/);
   });
 
+  it("forbids swapping the role's mode or provider when a start is denied", () => {
+    expect(prompt).toMatch(/never substitute another mode or provider/i);
+    expect(prompt).toMatch(/denied.*tell the user/is);
+  });
+
   it("marks roles without a workspace as sharing the orchestrator's", () => {
     const shared = orchestratorPrompt(sharedTeam, sharedModes, ".agents/team.json");
     expect(shared).toContain("| tests | orchestrator (shared) | claude/claude-sonnet-5-5 | auto | tests |");
@@ -93,5 +98,6 @@ describe("teamChangedMessage", () => {
     const message = teamChangedMessage(team, modes, ".agents/team.json");
     expect(message).toContain("--mode");
     expect(message).toContain("`default`");
+    expect(message).toMatch(/never substitute another mode or provider/i);
   });
 });
