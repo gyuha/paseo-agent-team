@@ -101,6 +101,16 @@ Your request → Orchestrator splits it by role → each role's agent works in i
 
 Either open the **Agent team** panel, press **Edit**, change the team and press **Apply**, or edit `.agents/team.json` directly and press **Apply again** in the panel. The panel shows the current team and flags any provider or model the host can't run.
 
+### 4. Watch the agents
+
+The **Agent dashboard** workspace panel (**에이전트 대시보드** in Korean) shows the project's agents as a tree. An agent started by another agent appears under that agent, so role agents started by the orchestrator sit under it. Agents with no parent are roots, and roots without children are listed under **Solo agents**.
+
+![Agent dashboard capture: an orchestrator with four role agents, where core and ui are running and tests and release have finished](images/agent-dashboard.gif)
+
+The capture shows the orchestrator as the root card, with four role agents under it. `core` and `ui` are running: their cards glow softly, and command packets travel from the orchestrator along the path to them, flashing each card on arrival. `tests` and `release` have finished and show ✓.
+
+Each card shows the provider logo, the role or caption, the title, and the model, effort (thinking option) and permission mode chips. The badge is **!** when the agent is waiting for a permission or has failed, an amber pulsing dot while it runs, and ✓ when it has finished. Lines to running agents turn into animated red dashes with moving signal dots. An agent that is not running itself but has a running agent below it, such as an orchestrator waiting on its role agents, gets an amber border without the glow. Press a card to open that agent. Closed and archived agents are hidden unless **Show closed** is on.
+
 ## Team definition format
 
 `.agents/team.json`:
@@ -154,7 +164,8 @@ The plugin's UI follows Paseo's app language. English is the default and Korean 
 - Role workspaces are local workspaces of the same checkout, so they share one folder. Keep roles to separate folders, or have the orchestrator run overlapping work in sequence.
 - The planner, the orchestrator and the role agents start in the provider's reviewed auto mode when it has one: Codex's Auto-review (`auto-review`), otherwise an `auto` mode such as Claude's Auto mode (`auto`). Only a provider with neither uses its unattended mode: the one marked unattended, otherwise the one Paseo marks dangerous, such as Antigravity's Full access. Otherwise they use the default mode. The unattended mode keeps running without asking you; Auto mode and Auto-review route permission requests through an automatic reviewer instead. The planner is told not to change files but is not technically prevented from doing so.
 - Paseo's sidebar puts a workspace it hasn't seen yet at the top of its project, so a new team lists the orchestrator first and the roles in team order. A workspace you already have keeps its place, so after applying a changed team, workspaces created for new roles appear above the orchestrator; drag them into place. The plugin cannot set the sidebar order.
-- Very long workspace or agent lists are read as a single page. On hosts with a lot of workspaces, an existing workspace could be missed and created again.
+- Very long workspace or agent lists are read as a single page. On hosts with a lot of workspaces, an existing workspace could be missed and created again, and the agent dashboard can miss agents beyond that page.
+- On Paseo hosts without client navigation, the agent dashboard cards are not pressable.
 
 ## Development
 

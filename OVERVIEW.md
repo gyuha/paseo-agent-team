@@ -1,4 +1,4 @@
-Create a project team in Paseo, with one workspace, provider and model for each role and an orchestrator to delegate your requests. Open the Agent team workspace panel or run Create agent team from the Command Center. The sidebar also offers team creation for projects without a team.
+Create a project team in Paseo, with one workspace, provider and model for each role and an orchestrator to delegate your requests. Open the Agent team workspace panel or run Create agent team from the Command Center. The sidebar also offers team creation for projects without a team. The Agent dashboard workspace panel shows the project's agents as a tree of agents started by other agents, with status badges, and opens an agent when its card is pressed on hosts that support client navigation.
 
 Requires Paseo 0.13.0 or newer and at least one ready provider on the host. Describe your goal to have a planner propose roles, or start with an empty team. While reviewing, describe a role in a sentence or two and use Add role with AI to have a planner propose one more role. Review the workspace names, models, folders and instructions before pressing Apply.
 

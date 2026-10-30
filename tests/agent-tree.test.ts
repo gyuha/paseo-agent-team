@@ -1,0 +1,365 @@
+import { describe, expect, it } from "vitest";
+import { agentNode, buildAgentForest, isHidden, parentOf, type AgentNode, type DashboardAgent } from "../shared/agent-tree";
+import { PROVIDER_LOGOS, providerIcon } from "../shared/provider-icons";
+
+const PARENT = "paseo.parent-agent-id";
+
+/** An agent shaped like the client snapshot: the parent only travels in the `paseo.parent-agent-id` label. */
+const agent = (id: string, over: Partial<DashboardAgent> = {}): DashboardAgent => ({
+  id,
+  workspaceId: "wks_a",
+  provider: "claude",
+  model: "claude-opus-5-5",
+  title: null,
+  status: "idle",
+  currentModeId: "auto",
+  thinkingOptionId: null,
+  effectiveThinkingOptionId: null,
+  labels: {},
+  archivedAt: null,
+  requiresAttention: false,
+  attentionReason: null,
+  createdAt: "2026-10-30T00:00:00Z",
+  ...over,
+});
+
+const child = (id: string, parent: string, over: Partial<DashboardAgent> = {}) => agent(id, { ...over, labels: { ...over.labels, [PARENT]: parent } });
+const at = (minute: number) => `2026-10-30T00:${String(minute).padStart(2, "0")}:00Z`;
+const ids = (nodes: AgentNode[]) => nodes.map((node) => node.agent.id);
+const show = { showClosed: true };
+const hide = { showClosed: false };
+
+describe("parentOf", () => {
+  it("reads the parent from the label", () => {
+    expect(parentOf(child("c", "p"))).toBe("p");
+  });
+
+  it("prefers parentAgentId over the label", () => {
+    expect(parentOf(child("c", "from-label", { parentAgentId: "from-field" }))).toBe("from-field");
+  });
+
+  it("falls back to the label when parentAgentId is null", () => {
+    expect(parentOf(child("c", "p", { parentAgentId: null }))).toBe("p");
+  });
+
+  it("is undefined without a parent or with an empty one", () => {
+    expect(parentOf(agent("c"))).toBeUndefined();
+    expect(parentOf(child("c", ""))).toBeUndefined();
+  });
+});
+
+describe("isHidden", () => {
+  it("hides closed and archived agents", () => {
+    expect(isHidden(agent("a", { status: "closed" }))).toBe(true);
+    expect(isHidden(agent("a", { archivedAt: "2026-10-30T01:00:00Z" }))).toBe(true);
+  });
+
+  it("keeps the others", () => {
+    for (const status of ["initializing", "idle", "running", "error"]) expect(isHidden(agent("a", { status }))).toBe(false);
+  });
+});
+
+describe("agentNode", () => {
+  it("takes the kind from the workspace-agents label first", () => {
+    expect(agentNode(agent("a", { labels: { "workspace-agents": "orchestrator", role: "x" } })).kind).toBe("orchestrator");
+    expect(agentNode(agent("a", { labels: { "workspace-agents": "planner" } })).kind).toBe("planner");
+  });
+
+  it("is a role with a role label, else a plain agent", () => {
+    const role = agentNode(agent("a", { labels: { role: "tests" } }));
+    expect(role.kind).toBe("role");
+    expect(role.role).toBe("tests");
+    const plain = agentNode(agent("a"));
+    expect(plain.kind).toBe("agent");
+    expect(plain.role).toBeNull();
+  });
+
+  it("ignores an unknown workspace-agents value", () => {
+    expect(agentNode(agent("a", { labels: { "workspace-agents": "other" } })).kind).toBe("agent");
+  });
+
+  it("titles with the trimmed title, else the first 7 characters of the id", () => {
+    expect(agentNode(agent("6eebacb4-4e8d", { title: "  Orchestrator  " })).title).toBe("Orchestrator");
+    expect(agentNode(agent("6eebacb4-4e8d", { title: null })).title).toBe("6eebacb");
+    expect(agentNode(agent("6eebacb4-4e8d", { title: "   " })).title).toBe("6eebacb");
+  });
+
+  it("passes model and mode through, null when missing", () => {
+    const node = agentNode(agent("a", { model: "gpt-6.1-sol", currentModeId: "auto-review" }));
+    expect(node.model).toBe("gpt-6.1-sol");
+    expect(node.mode).toBe("auto-review");
+    const bare = agentNode(agent("a", { model: null, currentModeId: undefined }));
+    expect(bare.model).toBeNull();
+    expect(bare.mode).toBeNull();
+  });
+
+  it("uses the effective thinking option, then the requested one, then null", () => {
+    expect(agentNode(agent("a", { effectiveThinkingOptionId: "high", thinkingOptionId: "auto" })).effort).toBe("high");
+    expect(agentNode(agent("a", { effectiveThinkingOptionId: null, thinkingOptionId: "auto" })).effort).toBe("auto");
+    expect(agentNode(agent("a")).effort).toBeNull();
+  });
+
+  it("carries the given children and defaults to none", () => {
+    const kid = agentNode(agent("k"));
+    expect(agentNode(agent("p"), [kid]).children).toEqual([kid]);
+    expect(agentNode(agent("p")).children).toEqual([]);
+  });
+
+  describe("badge and live", () => {
+    const badge = (over: Partial<DashboardAgent>) => agentNode(agent("a", over)).badge;
+
+    it("is attention for a permission or error request", () => {
+      expect(badge({ requiresAttention: true, attentionReason: "permission" })).toBe("attention");
+      expect(badge({ requiresAttention: true, attentionReason: "error" })).toBe("attention");
+    });
+
+    it("keeps attention over running", () => {
+      expect(badge({ status: "running", requiresAttention: true, attentionReason: "permission" })).toBe("attention");
+    });
+
+    it("is attention for status error", () => {
+      expect(badge({ status: "error" })).toBe("attention");
+    });
+
+    it("is running while running", () => {
+      expect(badge({ status: "running" })).toBe("running");
+    });
+
+    it("is done when finished and waiting for attention", () => {
+      expect(badge({ requiresAttention: true, attentionReason: "finished" })).toBe("done");
+    });
+
+    it("prefers running over done", () => {
+      expect(badge({ status: "running", requiresAttention: true, attentionReason: "finished" })).toBe("running");
+    });
+
+    it("is null otherwise", () => {
+      expect(badge({})).toBeNull();
+      expect(badge({ requiresAttention: false, attentionReason: "finished" })).toBeNull();
+      expect(badge({ requiresAttention: false, attentionReason: "permission" })).toBeNull();
+      expect(badge({ status: "initializing" })).toBeNull();
+    });
+
+    it("is live only while running", () => {
+      expect(agentNode(agent("a", { status: "running" })).live).toBe(true);
+      expect(agentNode(agent("a", { status: "idle" })).live).toBe(false);
+      expect(agentNode(agent("a", { status: "error" })).live).toBe(false);
+    });
+  });
+});
+
+describe("buildAgentForest", () => {
+  const scope = ["wks_a", "wks_b"];
+
+  it("nests a child under its parent given by the label", () => {
+    const { trees, solo } = buildAgentForest([agent("p"), child("c", "p")], scope, hide);
+    expect(ids(trees)).toEqual(["p"]);
+    expect(ids(trees[0]!.children)).toEqual(["c"]);
+    expect(solo).toEqual([]);
+  });
+
+  it("nests a child under its parent given by parentAgentId", () => {
+    const { trees } = buildAgentForest([agent("p"), agent("c", { parentAgentId: "p" })], scope, hide);
+    expect(ids(trees[0]!.children)).toEqual(["c"]);
+  });
+
+  it("builds nodes with agentNode's fields", () => {
+    const { trees } = buildAgentForest([agent("p", { labels: { "workspace-agents": "orchestrator" }, title: "Lead" }), child("c", "p", { labels: { role: "tests" } })], scope, hide);
+    expect(trees[0]).toMatchObject({ kind: "orchestrator", title: "Lead" });
+    expect(trees[0]!.children[0]).toMatchObject({ kind: "role", role: "tests", title: "c" });
+  });
+
+  it("only includes agents in the given workspaces", () => {
+    const { trees, solo } = buildAgentForest([agent("in"), agent("out", { workspaceId: "wks_other" }), agent("none", { workspaceId: null })], ["wks_a"], hide);
+    expect([...ids(trees), ...ids(solo)]).toEqual(["in"]);
+  });
+
+  it("returns nothing for an empty scope", () => {
+    expect(buildAgentForest([agent("a")], [], hide)).toEqual({ trees: [], solo: [] });
+  });
+
+  it("hides closed and archived agents by default", () => {
+    const agents = [agent("live"), agent("closed", { status: "closed" }), agent("archived", { archivedAt: "2026-10-30T01:00:00Z" })];
+    expect(ids(buildAgentForest(agents, scope, hide).solo)).toEqual(["live"]);
+  });
+
+  it("shows them with showClosed", () => {
+    const agents = [agent("live", { createdAt: at(3) }), agent("closed", { status: "closed", createdAt: at(2) }), agent("archived", { archivedAt: "2026-10-30T01:00:00Z", createdAt: at(1) })];
+    expect(ids(buildAgentForest(agents, scope, show).solo)).toEqual(["live", "closed", "archived"]);
+  });
+
+  it("promotes a child whose parent is hidden to a root", () => {
+    const agents = [agent("p", { status: "closed" }), child("c", "p")];
+    const hidden = buildAgentForest(agents, scope, hide);
+    expect(hidden.trees).toEqual([]);
+    expect(ids(hidden.solo)).toEqual(["c"]);
+    const shown = buildAgentForest(agents, scope, show);
+    expect(ids(shown.trees)).toEqual(["p"]);
+    expect(ids(shown.trees[0]!.children)).toEqual(["c"]);
+  });
+
+  it("promotes a child whose parent is out of scope or unknown to a root", () => {
+    const agents = [agent("p", { workspaceId: "wks_other" }), child("c", "p"), child("orphan", "missing")];
+    const { trees, solo } = buildAgentForest(agents, ["wks_a"], hide);
+    expect(trees).toEqual([]);
+    expect(ids(solo).sort()).toEqual(["c", "orphan"]);
+  });
+
+  it("nests across several levels without a depth limit", () => {
+    const chain = [agent("l0")];
+    for (let level = 1; level <= 6; level += 1) chain.push(child(`l${level}`, `l${level - 1}`));
+    const { trees } = buildAgentForest(chain, scope, hide);
+    let node = trees[0]!;
+    for (let level = 1; level <= 6; level += 1) {
+      expect(ids(node.children)).toEqual([`l${level}`]);
+      node = node.children[0]!;
+    }
+    expect(node.children).toEqual([]);
+  });
+
+  it("nests siblings and grandchildren together", () => {
+    const agents = [agent("p"), child("a", "p", { createdAt: at(1) }), child("b", "p", { createdAt: at(2) }), child("a1", "a")];
+    const { trees } = buildAgentForest(agents, scope, hide);
+    expect(ids(trees[0]!.children)).toEqual(["a", "b"]);
+    expect(ids(trees[0]!.children[0]!.children)).toEqual(["a1"]);
+  });
+
+  it("does not loop on a cycle and makes a root of it", () => {
+    const { trees, solo } = buildAgentForest([child("a", "b"), child("b", "a")], scope, hide);
+    const all = [...trees, ...solo];
+    expect(all.length).toBeGreaterThanOrEqual(1);
+    const seen: string[] = [];
+    const walk = (node: AgentNode) => {
+      seen.push(node.agent.id);
+      node.children.forEach(walk);
+    };
+    all.forEach(walk);
+    expect(seen.sort()).toEqual(["a", "b"]);
+  });
+
+  it("makes a root of an agent that is its own parent", () => {
+    const { trees, solo } = buildAgentForest([child("a", "a")], scope, hide);
+    expect(trees).toEqual([]);
+    expect(ids(solo)).toEqual(["a"]);
+  });
+
+  it("splits roots with children into trees and the rest into solo", () => {
+    const { trees, solo } = buildAgentForest([agent("p"), child("c", "p"), agent("alone")], scope, hide);
+    expect(ids(trees)).toEqual(["p"]);
+    expect(ids(solo)).toEqual(["alone"]);
+  });
+
+  describe("order", () => {
+    it("puts orchestrator roots first, then the rest by createdAt descending", () => {
+      const agents = [
+        agent("old", { createdAt: at(1) }),
+        child("old-kid", "old"),
+        agent("new", { createdAt: at(9) }),
+        child("new-kid", "new"),
+        agent("lead", { createdAt: at(0), labels: { "workspace-agents": "orchestrator" } }),
+        child("lead-kid", "lead"),
+      ];
+      expect(ids(buildAgentForest(agents, scope, hide).trees)).toEqual(["lead", "new", "old"]);
+    });
+
+    it("orders several orchestrators by createdAt descending", () => {
+      const lead = (id: string, minute: number) => agent(id, { createdAt: at(minute), labels: { "workspace-agents": "orchestrator" } });
+      const agents = [lead("l1", 1), child("k1", "l1"), lead("l2", 5), child("k2", "l2")];
+      expect(ids(buildAgentForest(agents, scope, hide).trees)).toEqual(["l2", "l1"]);
+    });
+
+    it("orders children by createdAt ascending", () => {
+      const agents = [agent("p"), child("late", "p", { createdAt: at(8) }), child("early", "p", { createdAt: at(2) }), child("mid", "p", { createdAt: at(5) })];
+      expect(ids(buildAgentForest(agents, scope, hide).trees[0]!.children)).toEqual(["early", "mid", "late"]);
+    });
+
+    it("orders solo agents by createdAt descending", () => {
+      const agents = [agent("a", { createdAt: at(1) }), agent("c", { createdAt: at(3) }), agent("b", { createdAt: at(2) })];
+      expect(ids(buildAgentForest(agents, scope, hide).solo)).toEqual(["c", "b", "a"]);
+    });
+  });
+});
+
+describe("delegating", () => {
+  const scope = ["wks_a"];
+  const running = { status: "running" };
+  const forest = (agents: DashboardAgent[]) => buildAgentForest(agents, scope, { showClosed: false });
+
+  it("is true for an idle parent with a running child", () => {
+    const { trees } = forest([agent("p"), child("c", "p", running)]);
+    expect(trees[0]!.live).toBe(false);
+    expect(trees[0]!.delegating).toBe(true);
+  });
+
+  it("is false for a running parent, even with a running child", () => {
+    const { trees } = forest([agent("p", running), child("c", "p", running)]);
+    expect(trees[0]!.live).toBe(true);
+    expect(trees[0]!.delegating).toBe(false);
+  });
+
+  it("is true for every idle ancestor of a running descendant", () => {
+    const { trees } = forest([agent("gp"), child("p", "gp"), child("c", "p", running)]);
+    const parent = trees[0]!.children[0]!;
+    expect(trees[0]!.delegating).toBe(true);
+    expect(parent.delegating).toBe(true);
+    expect(parent.children[0]!.delegating).toBe(false);
+  });
+
+  it("stops at a running ancestor but still marks the idle ones above it", () => {
+    const { trees } = forest([agent("gp"), child("p", "gp", running), child("c", "p", running)]);
+    expect(trees[0]!.delegating).toBe(true);
+    expect(trees[0]!.children[0]!.delegating).toBe(false);
+  });
+
+  it("is false when no descendant is running", () => {
+    const { trees } = forest([agent("p"), child("c", "p"), child("d", "c", { status: "error" })]);
+    expect(trees[0]!.delegating).toBe(false);
+    expect(trees[0]!.children[0]!.delegating).toBe(false);
+  });
+
+  it("is false for solo nodes", () => {
+    const { solo } = forest([agent("a"), agent("b", running)]);
+    expect(solo.map((node) => node.delegating)).toEqual([false, false]);
+  });
+
+  it("is computed by agentNode from the given children", () => {
+    const live = agentNode(agent("c", running));
+    const idle = agentNode(agent("c"));
+    expect(agentNode(agent("p"), [live]).delegating).toBe(true);
+    expect(agentNode(agent("p"), [agentNode(agent("m"), [live])]).delegating).toBe(true);
+    expect(agentNode(agent("p"), [idle]).delegating).toBe(false);
+    expect(agentNode(agent("p", running), [live]).delegating).toBe(false);
+    expect(agentNode(agent("p")).delegating).toBe(false);
+  });
+});
+
+describe("PROVIDER_LOGOS", () => {
+  it.each(["claude", "codex", "copilot"])("has an inline svg for %s", (provider) => {
+    const svg = PROVIDER_LOGOS[provider];
+    expect(svg).toBeDefined();
+    expect(svg!.trimStart().startsWith("<svg")).toBe(true);
+    expect(svg).toContain("viewBox");
+    expect(svg).not.toMatch(/<script|href=|xlink:|https?:/i);
+  });
+});
+
+describe("providerIcon", () => {
+  it("uses the built-in logo first", () => {
+    expect(providerIcon("claude", "<svg>snapshot</svg>")).toEqual({ kind: "svg", svg: PROVIDER_LOGOS.claude });
+    expect(providerIcon("codex")).toEqual({ kind: "svg", svg: PROVIDER_LOGOS.codex });
+  });
+
+  it("falls back to the snapshot svg", () => {
+    expect(providerIcon("antigravity", "<svg>snapshot</svg>")).toEqual({ kind: "svg", svg: "<svg>snapshot</svg>" });
+  });
+
+  it("falls back to the uppercased first letter", () => {
+    expect(providerIcon("antigravity")).toEqual({ kind: "letter", letter: "A" });
+    expect(providerIcon("omp", null)).toEqual({ kind: "letter", letter: "O" });
+    expect(providerIcon("omp", "")).toEqual({ kind: "letter", letter: "O" });
+  });
+
+  it("uses ? for an empty provider", () => {
+    expect(providerIcon("")).toEqual({ kind: "letter", letter: "?" });
+  });
+});

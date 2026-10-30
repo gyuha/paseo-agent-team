@@ -1,9 +1,11 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
+import { AgentDashboard } from "./client/AgentDashboard";
 import { messages } from "./client/i18n";
 import { TeamPanel } from "./client/TeamPanel";
 import { SCREEN_ID, TeamScreen, TeamSidebarItem } from "./client/TeamScreen";
 
 export default function contribute(client: PluginClientContext) {
+  client.addWorkspacePanel({ id: "agent-dashboard", title: messages.message("dashboardTitle"), icon: "Network", locations: ["workspace"], Component: AgentDashboard });
   client.addWorkspacePanel({ id: "team", title: messages.message("panelTitle"), icon: "Users", locations: ["workspace"], Component: TeamPanel });
   client.addScreen({ id: SCREEN_ID, title: messages.message("commandTitle"), Component: TeamScreen });
   client.addSidebarHeaderItem({ id: "team", title: messages.message("commandTitle"), Component: TeamSidebarItem });

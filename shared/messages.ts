@@ -1,6 +1,13 @@
 // UI text. English is the default; Paseo picks the resource for the app's language.
 
 export const en = {
+  dashboardTitle: "Agent dashboard",
+  showClosed: "Show closed",
+  soloAgents: "Solo agents",
+  orchestrator: "Orchestrator",
+  planner: "Planner",
+  emptyDashboard: "No agents in this project yet.",
+  dashboardError: "Could not load agents.",
   panelTitle: "Agent team",
   commandTitle: "Create agent team",
   loading: "Loading…",
@@ -54,6 +61,13 @@ export const en = {
 type Shape<T> = { readonly [K in keyof T]: T[K] extends string ? string : Shape<T[K]> };
 
 export const ko: Shape<typeof en> = {
+  dashboardTitle: "에이전트 대시보드",
+  showClosed: "닫힌 에이전트 표시",
+  soloAgents: "단독 에이전트",
+  orchestrator: "오케스트레이터",
+  planner: "플래너",
+  emptyDashboard: "이 프로젝트에 에이전트가 없습니다.",
+  dashboardError: "에이전트를 불러오지 못했습니다.",
   panelTitle: "에이전트 팀",
   commandTitle: "에이전트 팀 만들기",
   loading: "불러오는 중…",
