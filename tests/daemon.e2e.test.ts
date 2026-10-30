@@ -7,10 +7,9 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { applyTeam, proposeRole, startTeamHere, teamlessProjects, proposeTeam, readTeam, roleProposal, teamProposal } from "../server/team";
+import { applyTeam, proposeRole, teamlessProjects, proposeTeam, readTeam, roleProposal, teamProposal } from "../server/team";
 import { workspaceLabel } from "../shared/apply-plan";
-import { orchestratorIn } from "../shared/cleanup";
-import { isSharedRole, TEAM_FILE, TeamSchema, type Team } from "../shared/team";
+import { isSharedRole, TeamSchema, type Team } from "../shared/team";
 import { agentModeOf, validateTeam } from "../shared/validate";
 
 describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemon", () => {
@@ -108,7 +107,9 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     const result = await applyTeam({ workspaceId, team: proposed }, { paseo });
     if (!result.ok) throw new Error(result.errors.join("\n"));
     expect(result.cleanup).toEqual([]);
-    expect(JSON.parse(readFileSync(join(root, TEAM_FILE), "utf8")).roles.length).toBe(proposed.roles.length);
+    // A new team gets its own file, named after its orchestrator's workspace.
+    expect(result.file.startsWith(join(root, ".agents/teams/"))).toBe(true);
+    expect(JSON.parse(readFileSync(result.file, "utf8")).roles.length).toBe(proposed.roles.length);
     // The planner leaves most roles without a workspace of their own, so only the others get one besides the orchestrator's.
     expect(result.workspaces).toHaveLength(proposed.roles.filter((role) => !isSharedRole(role)).length + 1);
 
@@ -134,6 +135,7 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     const again = await applyTeam({ projectId, team: proposed }, { paseo });
     expect(again.ok && again.workspaces.every((workspace) => !workspace.created)).toBe(true);
     expect(again.ok && again.orchestratorAgentId).toBe(result.orchestratorAgentId);
+    expect(again.ok && again.file).toBe(result.file);
     expect((await teamlessProjects({}, { paseo })).some((project) => project.id === projectId)).toBe(false);
   }, 120_000);
 
@@ -159,45 +161,39 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     expect(titles).not.toContain("");
   }, 120_000);
 
-  it("starts an orchestrator in another workspace and tells every orchestrator when the team is applied again", async () => {
+  it("runs a second team in another workspace, from its own file", async () => {
     const projectWorkspaces = async () => (await paseo.workspaces.list()).entries.filter((entry) => entry.projectId === projectId && !entry.archivingAt);
-    const team = (await readTeam({ projectId }, { paseo })).team!;
-    const homeWorkspace = (await projectWorkspaces()).find((entry) => workspaceLabel(entry).trim().toLowerCase() === team.orchestrator.workspace.toLowerCase())!;
-    const agentsNow = async () => (await paseo.agents.list()).entries.map((entry) => entry.agent);
-    const home = orchestratorIn(await agentsNow(), homeWorkspace.id);
-    expect(home).toBeDefined();
+    const lead = (await projectWorkspaces()).find((entry) => workspaceLabel(entry).trim().toLowerCase() === proposed.orchestrator.workspace.trim().toLowerCase())!;
+    const first = await readTeam({ workspaceId: lead.id }, { paseo });
+    expect(first.team?.orchestrator.workspace).toBe(proposed.orchestrator.workspace);
 
-    const second = (await paseo.workspaces.create({ title: `side-${Date.now()}`, source: { kind: "directory", path: root, projectId } })).id;
+    const title = `side-${Date.now()}`;
+    const side = (await paseo.workspaces.create({ title, source: { kind: "directory", path: root, projectId } })).id;
+    const before = await readTeam({ workspaceId: side }, { paseo });
+    expect(before.team).toBeNull();
+    expect(before.workspace).toBe(title);
+    expect(before.takenWorkspaces.map((workspace) => workspace.toLowerCase())).toContain(proposed.orchestrator.workspace.toLowerCase());
+
+    // A team whose role takes the first team's workspace is refused before anything is written.
+    const template = proposed.roles[0]!;
+    const clashing: Team = { ...proposed, orchestrator: { ...proposed.orchestrator, workspace: title }, roles: [{ ...template, name: "steal", workspace: proposed.orchestrator.workspace }] };
+    const refused = await applyTeam({ workspaceId: side, team: clashing }, { paseo });
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.errors.join("\n")).toContain("belongs to another team");
+
     const workspacesBefore = (await projectWorkspaces()).length;
-
-    const started = await startTeamHere({ workspaceId: second }, { paseo });
-    if (!started.ok) throw new Error(started.errors.join("\n"));
-    expect(started.created).toBe(true);
-    const orchestrator = (await paseo.agents.ref(started.orchestratorAgentId).refresh())!.agent;
-    expect(orchestrator.workspaceId).toBe(second);
-    expect(orchestrator.labels["workspace-agents"]).toBe("orchestrator");
-    expect(started.orchestratorAgentId).not.toBe(home!.id);
-    // Starting here creates no workspace.
-    expect((await projectWorkspaces()).length).toBe(workspacesBefore);
-
-    const again = await startTeamHere({ workspaceId: second }, { paseo });
-    expect(again).toEqual({ ok: true, orchestratorAgentId: started.orchestratorAgentId, created: false });
-
-    // Applying the same team sends a message to the orchestrator in each workspace; the agent snapshot's lastUserMessageAt shows it.
-    const lastUserMessage = async (id: string) => {
-      const at = (await paseo.agents.ref(id).refresh())?.agent.lastUserMessageAt;
-      return at ? Date.parse(at) : 0;
-    };
-    const before = { home: await lastUserMessage(home!.id), second: await lastUserMessage(started.orchestratorAgentId) };
-    const applied = await applyTeam({ projectId, team }, { paseo });
+    const second: Team = { ...proposed, goal: "Second team", orchestrator: { ...proposed.orchestrator, workspace: title }, roles: [{ ...template, workspace: "" }] };
+    const applied = await applyTeam({ workspaceId: side, team: second }, { paseo });
     if (!applied.ok) throw new Error(applied.errors.join("\n"));
-    expect(applied.orchestratorAgentId).toBe(home!.id);
-    let after = { home: before.home, second: before.second };
-    for (let attempt = 0; attempt < 20 && !(after.home > before.home && after.second > before.second); attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      after = { home: await lastUserMessage(home!.id), second: await lastUserMessage(started.orchestratorAgentId) };
-    }
-    expect(after.home).toBeGreaterThan(before.home);
-    expect(after.second).toBeGreaterThan(before.second);
+    expect(applied.file).toBe(join(root, ".agents/teams", `${title}.json`));
+    expect(applied.workspaces).toEqual([{ target: "orchestrator", workspace: title, id: side, created: false }]);
+    expect((await projectWorkspaces()).length).toBe(workspacesBefore);
+    const orchestrator = (await paseo.agents.ref(applied.orchestratorAgentId).refresh())!.agent;
+    expect(orchestrator.workspaceId).toBe(side);
+    expect(orchestrator.labels["workspace-agents"]).toBe("orchestrator");
+
+    // Each workspace reads its own team; the first one is untouched.
+    expect((await readTeam({ workspaceId: side }, { paseo })).team?.goal).toBe("Second team");
+    expect((await readTeam({ workspaceId: lead.id }, { paseo })).team).toEqual(first.team);
   }, 180_000);
 });

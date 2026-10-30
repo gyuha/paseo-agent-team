@@ -1,14 +1,14 @@
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
+import { useRpc, useTranslation } from "@getpaseo/plugin/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { LABEL } from "../shared/cleanup";
 import { foldersText, newRole, parseFolders } from "../shared/draft";
 import { messages } from "./i18n";
-import { teamApplyRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRoleProposalRpc, teamRoleProposeRpc, teamStartHereRpc } from "../shared/rpc";
+import { teamApplyRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRoleProposalRpc, teamRoleProposeRpc } from "../shared/rpc";
 import { checkTeam, isSharedRole, type Role, type Team } from "../shared/team";
+import { TEAMS_DIR, workspaceClashes } from "../shared/team-files";
 import { validateTeam, type ProviderInfo } from "../shared/validate";
 
 type Colors = PluginWorkspacePanelProps["theme"]["colors"];
@@ -96,42 +96,6 @@ function RoleEditor({ s, role, catalog, onChange, onRemove }: { s: Styles; role:
   );
 }
 
-function StartHere({ workspaceId, navigation, s }: { workspaceId: string; navigation: PluginScreenProps["navigation"]; s: Styles }) {
-  const paseo = usePaseo();
-  const queryClient = useQueryClient();
-  const { t } = useTranslation(messages);
-  const startHere = useRpc(teamStartHereRpc);
-  const key = ["workspace-agents", "orchestrators", workspaceId] as const;
-  const agents = useQuery({ queryKey: key, queryFn: () => paseo.agents.list() });
-  useEffect(() => {
-    const unsubscribe = paseo.agents.subscribe(() => void queryClient.invalidateQueries({ queryKey: ["workspace-agents", "orchestrators", workspaceId] }));
-    let active = true;
-    let release: (() => void) | undefined;
-    void paseo.agents.list({ subscribe: {} }).then(({ subscription }) => {
-      if (active) release = () => { void subscription.release(); };
-      else void subscription.release();
-    }).catch(() => {});
-    return () => { active = false; unsubscribe(); release?.(); };
-  }, [paseo, queryClient, workspaceId]);
-  const started = useMutation({
-    mutationFn: () => startHere({ workspaceId }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: key }),
-  });
-  const startedAgentId = started.data?.ok ? started.data.orchestratorAgentId : null;
-  const hasOrchestrator = agents.data?.entries.some(({ agent }) => agent.workspaceId === workspaceId && !agent.archivedAt && agent.labels[LABEL] === "orchestrator");
-  return <>
-    {agents.data && !hasOrchestrator && !started.data?.ok ? <Button s={s} secondary label={t("current.startHere")} disabled={started.isPending} onPress={() => started.mutate()} /> : null}
-    {started.isPending ? <Text style={s.muted}>{t("current.startingHere")}</Text> : null}
-    {agents.error ? <Text style={s.danger}>{String(agents.error)}</Text> : null}
-    {started.error ? <Text style={s.danger}>{String(started.error)}</Text> : null}
-    {started.data && !started.data.ok ? started.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
-    {started.data?.ok ? <>
-      <Text style={s.success}>{t(started.data.created ? "current.startedHere" : "current.reusedHere")}</Text>
-      {navigation && startedAgentId ? <Button s={s} secondary label={t("result.openOrchestrator")} onPress={() => navigation.openAgent({ agentId: startedAgentId })} /> : null}
-    </> : null}
-  </>;
-}
-
 /** Where the team goes: a workspace's project, or a project picked without a workspace. */
 type Target = { workspaceId: string } | { projectId: string };
 
@@ -166,8 +130,11 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
     enabled: plannerId !== null,
     refetchInterval: (query) => (query.state.data?.status === "running" || !query.state.data ? 2000 : false),
   });
+  // From a workspace, the team's orchestrator always runs in that workspace.
+  const here = current.data?.workspace ?? null;
+  const atHere = (team: Team): Team => (here === null ? team : { ...team, orchestrator: { ...team.orchestrator, workspace: here } });
   useEffect(() => {
-    if (planning.data?.status === "done") setDraft(planning.data.team);
+    if (planning.data?.status === "done") setDraft(atHere(planning.data.team));
   }, [planning.data]);
 
   // One AI role request at a time; its result is appended to the draft and dropped if the draft was cancelled.
@@ -205,7 +172,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
 
   const catalog = current.data?.catalog ?? [];
   const checked = draft ? checkTeam(draft) : null;
-  const problems = draft && checked?.ok ? validateTeam(checked.team, catalog).map((error) => `${error.target}: ${error.message}`) : (checked && !checked.ok ? checked.errors : []);
+  const problems = draft && checked?.ok ? [...validateTeam(checked.team, catalog), ...workspaceClashes(checked.team, current.data?.takenWorkspaces ?? [])].map((error) => `${error.target}: ${error.message}`) : (checked && !checked.ok ? checked.errors : []);
   const updateRole = (index: number, role: Role) => draft && setDraft({ ...draft, roles: draft.roles.map((entry, at) => (at === index ? role : entry)) });
 
   if (current.isLoading) return <View style={[s.screen, s.body]}><Text style={s.muted}>{t("loading")}</Text></View>;
@@ -215,7 +182,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
       <Text style={s.title}>{t("title", { project: data.project.name })}</Text>
-      <Text style={s.muted}>{data.project.root}/.agents/team.json</Text>
+      <Text style={s.muted}>{data.project.root}/{data.file ?? `${TEAMS_DIR}/`}</Text>
 
       {data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>)}
       {data.team && !draft ? (
@@ -228,18 +195,18 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
           <View style={s.row}>
             <Button s={s} label={t("current.edit")} onPress={() => setDraft(data.team)} />
             <Button s={s} secondary label={t("current.reapply")} disabled={applied.isPending} onPress={() => applied.mutate(data.team!)} />
-            {"workspaceId" in target ? <StartHere key={target.workspaceId} workspaceId={target.workspaceId} navigation={navigation} s={s} /> : null}
           </View>
         </View>
       ) : null}
 
-      {!draft ? (
+      {data.owner ? <Text style={s.muted}>{t("current.roleOf", data.owner)}</Text> : null}
+      {data.owner ? null : !draft ? (
         <View style={s.card}>
-          <Text style={s.text}>{t("create.intro")}</Text>
+          <Text style={s.text}>{t(here === null ? "create.intro" : "create.introHere")}</Text>
           <TextInput style={s.input} value={goal} placeholder={t("create.goalPlaceholder")} onChangeText={setGoal} />
           <View style={s.row}>
             <Button s={s} label={t("create.propose")} disabled={!goal.trim() || start.isPending || planning.data?.status === "running"} onPress={() => start.mutate()} />
-            <Button s={s} secondary label={t("create.blank")} onPress={() => setDraft({ version: 1, goal, orchestrator: { workspace: "orchestrator", provider: "claude", model: catalog.find((entry) => entry.id === "claude")?.models[0]?.id ?? "" }, roles: [newRole(catalog, [])] })} />
+            <Button s={s} secondary label={t("create.blank")} onPress={() => setDraft({ version: 1, goal, orchestrator: { workspace: here ?? "orchestrator", provider: "claude", model: catalog.find((entry) => entry.id === "claude")?.models[0]?.id ?? "" }, roles: [newRole(catalog, [])] })} />
           </View>
           {plannerId && (!planning.data || planning.data.status === "running") ? <Text style={s.muted}>{t("create.planning")}</Text> : null}
           {planning.data?.status === "failed" ? planning.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
@@ -250,8 +217,10 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
         <View style={{ gap: 10 }}>
           <Text style={s.title}>{t("review.title")}</Text>
           <View style={s.card}>
-            <Text style={s.text}>{t("review.orchestrator")}</Text>
-            <TextInput style={s.input} value={draft.orchestrator.workspace} placeholder={t("role.workspace")} onChangeText={(workspace) => setDraft({ ...draft, orchestrator: { ...draft.orchestrator, workspace } })} />
+            {here === null ? <>
+              <Text style={s.text}>{t("review.orchestrator")}</Text>
+              <TextInput style={s.input} value={draft.orchestrator.workspace} placeholder={t("role.workspace")} onChangeText={(workspace) => setDraft({ ...draft, orchestrator: { ...draft.orchestrator, workspace } })} />
+            </> : <Text style={s.text}>{t("review.orchestratorHere", { workspace: here })}</Text>}
             <ModelPicker s={s} catalog={catalog} provider={draft.orchestrator.provider} model={draft.orchestrator.model} onChange={(next) => setDraft({ ...draft, orchestrator: { ...draft.orchestrator, ...next } })} />
           </View>
           {draft.roles.map((role, index) => (

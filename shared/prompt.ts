@@ -1,42 +1,30 @@
-import { isSharedRole, TEAM_FILE, type Team } from "./team";
-
-/** Where an orchestrator runs: the team's home workspace, or another workspace where every role is shared. */
-export interface Placement {
-  home: boolean;
-  workspace: string;
-}
+import { isSharedRole, type Team } from "./team";
 
 const MODE_RULE = "Start each role's agent with its Mode from the table using `--mode <mode>`; omit `--mode` when the Mode is `default`.";
 
-const away = (placement?: Placement) => (placement && !placement.home ? placement.workspace : undefined);
-
-const runsHere = (workspace: string) => `This team runs in workspace ${workspace}; every role is shared here.`;
-
 /**
  * The team as a markdown table; Mode is the role's agent mode, or "default" when its provider has none.
- * A role without a workspace shows the orchestrator's, marked (shared); away from home every role does.
+ * A role without a workspace shows the orchestrator's, marked (shared).
  */
-function teamTable(team: Team, modes: Record<string, string | undefined>, placement?: Placement): string[] {
-  const here = away(placement);
+function teamTable(team: Team, modes: Record<string, string | undefined>): string[] {
   return [
     "| Role | Workspace | Provider/model | Mode | Folders |",
     "| --- | --- | --- | --- | --- |",
-    ...team.roles.map((role) => `| ${role.name} | ${here !== undefined ? `${here} (shared)` : isSharedRole(role) ? `${team.orchestrator.workspace} (shared)` : role.workspace} | ${role.provider}/${role.model} | ${modes[role.name] ?? "default"} | ${role.folders.length ? role.folders.join(", ") : "(any)"} |`),
+    ...team.roles.map((role) => `| ${role.name} | ${isSharedRole(role) ? `${team.orchestrator.workspace} (shared)` : role.workspace} | ${role.provider}/${role.model} | ${modes[role.name] ?? "default"} | ${role.folders.length ? role.folders.join(", ") : "(any)"} |`),
   ];
 }
 
-/** The orchestrator's standing instructions, rendered from the team definition; `placement` defaults to the team's home. */
-export function orchestratorPrompt(team: Team, modes: Record<string, string | undefined>, placement?: Placement): string {
-  const here = away(placement);
+/** The orchestrator's standing instructions, rendered from the team definition in `file` (project-relative). */
+export function orchestratorPrompt(team: Team, modes: Record<string, string | undefined>, file: string): string {
   const notes = team.roles.filter((role) => role.instructions.trim()).map((role) => `- ${role.name}: ${role.instructions.trim()}`);
   return [
     "You are the orchestrator of this project's agent team in Paseo.",
     team.goal.trim() ? `Team goal: ${team.goal.trim()}` : "",
-    `The team is defined in ${TEAM_FILE} at the project root. Re-read it before delegating; it wins over this summary if they differ.`,
-    here !== undefined ? runsHere(here) : "",
+    `The team is defined in ${file} at the project root. Re-read it before delegating; it wins over this summary if they differ.`,
+    "Other workspaces of this project may run other teams from other files in .agents/. Ignore them and their workspaces.",
     "",
     "## Team",
-    ...teamTable(team, modes, placement),
+    ...teamTable(team, modes),
     ...(notes.length ? ["", "## Role notes", ...notes] : []),
     "",
     "## How to delegate",
@@ -53,7 +41,6 @@ export function orchestratorPrompt(team: Team, modes: Record<string, string | un
 }
 
 /** What a running orchestrator is told when the team is applied again. */
-export function teamChangedMessage(team: Team, modes: Record<string, string | undefined>, placement?: Placement): string {
-  const here = away(placement);
-  return [`The team in ${TEAM_FILE} changed. Re-read it and use it from now on.`, ...(here !== undefined ? [runsHere(here)] : []), "", ...teamTable(team, modes, placement), "", MODE_RULE].join("\n");
+export function teamChangedMessage(team: Team, modes: Record<string, string | undefined>, file: string): string {
+  return [`The team in ${file} changed. Re-read it and use it from now on.`, "", ...teamTable(team, modes), "", MODE_RULE].join("\n");
 }

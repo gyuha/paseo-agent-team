@@ -23,14 +23,22 @@ export const teamProjectsRpc = defineRpc({
   output: z.array(ProjectSchema),
 });
 
-/** The project (or a workspace's project), its team file (if any) and what this host can run. */
+/** The project (or a workspace's project), the team that runs in the workspace (if any) and what this host can run. */
 export const teamReadRpc = defineRpc({
   name: "team.read",
   input: TargetSchema,
   output: z.object({
     project: ProjectSchema,
+    /** The target workspace's title, or null when the target is the project. */
+    workspace: z.string().nullable(),
+    /** The project-relative file of the team that runs in the workspace, or null when it has none. */
+    file: z.string().nullable(),
     team: TeamSchema.nullable(),
-    /** Problems reading or parsing the team file. */
+    /** When the workspace has no team: the team (by its orchestrator's workspace) and role that use it as the role's own. */
+    owner: z.object({ team: z.string(), role: z.string() }).nullable(),
+    /** Workspace titles the project's other teams use; a team can't use them too. */
+    takenWorkspaces: z.array(z.string()),
+    /** Problems reading or parsing the project's team files. */
     errors: z.array(z.string()),
     /** Providers or models in the team file this host can't run. */
     validation: z.array(TeamErrorSchema),
@@ -76,16 +84,6 @@ export const teamRoleProposalRpc = defineRpc({
     z.object({ status: z.literal("running") }),
     z.object({ status: z.literal("done"), role: RoleSchema }),
     z.object({ status: z.literal("failed"), errors: z.array(z.string()) }),
-  ]),
-});
-
-/** Starts the team's orchestrator in this workspace, or reuses the one already there. */
-export const teamStartHereRpc = defineRpc({
-  name: "team.start-here",
-  input: z.object({ workspaceId: z.string() }),
-  output: z.discriminatedUnion("ok", [
-    z.object({ ok: z.literal(false), errors: z.array(z.string()) }),
-    z.object({ ok: z.literal(true), orchestratorAgentId: z.string(), created: z.boolean() }),
   ]),
 });
 

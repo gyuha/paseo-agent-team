@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findOrchestrator, orchestratorIn, plannerCleanup, projectOrchestrators, type OrchestratorCandidate } from "../shared/cleanup";
+import { findOrchestrator, plannerCleanup, type OrchestratorCandidate } from "../shared/cleanup";
 import type { Team } from "../shared/team";
 
 const team: Team = {
@@ -86,56 +86,5 @@ describe("findOrchestrator", () => {
     ];
     expect(findOrchestrator(agents, "wks_lead", team, "bypassPermissions")?.id).toBe("good");
     expect(findOrchestrator(agents.slice(0, 4), "wks_lead", team, "bypassPermissions")).toBeUndefined();
-  });
-});
-
-describe("projectOrchestrators and orchestratorIn", () => {
-  const lead = (id: string, workspaceId: string, over: Partial<OrchestratorCandidate> = {}): OrchestratorCandidate => ({
-    id,
-    workspaceId,
-    labels: { "workspace-agents": "orchestrator" },
-    archivedAt: null,
-    provider: "claude",
-    model: "claude-opus-5-5",
-    currentModeId: "auto",
-    ...over,
-  });
-  const agents = [
-    lead("home", "wks_home"),
-    lead("feature", "wks_feature"),
-    lead("old", "wks_feature", { archivedAt: "2026-10-30T00:00:00Z" }),
-    lead("other-project", "wks_elsewhere"),
-    lead("planner", "wks_home", { labels: { "workspace-agents": "planner" } }),
-    lead("unlabeled", "wks_home", { labels: {} }),
-    lead("no-workspace", "wks_home", { workspaceId: null }),
-  ];
-
-  it("lists the unarchived orchestrators in the given workspaces", () => {
-    expect(projectOrchestrators(agents, ["wks_home", "wks_feature"]).map((agent) => agent.id)).toEqual(["home", "feature"]);
-  });
-
-  it("returns none for no workspaces or workspaces without one", () => {
-    expect(projectOrchestrators(agents, [])).toEqual([]);
-    expect(projectOrchestrators(agents, ["wks_empty"])).toEqual([]);
-  });
-
-  it("keeps the order of the agents", () => {
-    const reversed = [...agents].reverse();
-    expect(projectOrchestrators(reversed, ["wks_home", "wks_feature"]).map((agent) => agent.id)).toEqual(["feature", "home"]);
-  });
-
-  it("finds the orchestrator in one workspace", () => {
-    expect(orchestratorIn(agents, "wks_feature")?.id).toBe("feature");
-    expect(orchestratorIn(agents, "wks_home")?.id).toBe("home");
-  });
-
-  it("ignores archived, other-label and other-workspace agents", () => {
-    expect(orchestratorIn([agents[2]!], "wks_feature")).toBeUndefined();
-    expect(orchestratorIn(agents, "wks_elsewhere")?.id).toBe("other-project");
-    expect(orchestratorIn(agents, "wks_empty")).toBeUndefined();
-  });
-
-  it("takes the first when a workspace has several", () => {
-    expect(orchestratorIn([lead("first", "wks_home"), lead("second", "wks_home")], "wks_home")?.id).toBe("first");
   });
 });

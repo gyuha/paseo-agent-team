@@ -1,14 +1,15 @@
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { ensureWorkspaces, planWorkspaces, workspaceLabel } from "../shared/apply-plan";
-import { findOrchestrator, LABEL, PLANNER_WORKSPACE, plannerCleanup, projectOrchestrators } from "../shared/cleanup";
+import { findOrchestrator, LABEL, PLANNER_WORKSPACE, plannerCleanup } from "../shared/cleanup";
 import { orchestratorPrompt, teamChangedMessage } from "../shared/prompt";
 import { extractProposal, extractRole, plannerPrompt, ROLE_JSON_SCHEMA, rolePrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
 import { plannerWorkspace, projectsWithoutTeam, type ProjectRef } from "../shared/projects";
-import type { teamApplyRpc, teamProjectsRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRoleProposalRpc, teamRoleProposeRpc, teamStartHereRpc } from "../shared/rpc";
-import { checkTeam, parseTeam, serializeTeam, TEAM_FILE, type Team } from "../shared/team";
+import type { teamApplyRpc, teamProjectsRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRoleProposalRpc, teamRoleProposeRpc } from "../shared/rpc";
+import { checkTeam, parseTeam, serializeTeam, TEAM_FILE } from "../shared/team";
+import { roleOwnerOf, teamFileFor, teamIn, TEAMS_DIR, workspaceClashes, workspacesOfOtherTeams, type TeamFile } from "../shared/team-files";
 import { catalogFrom, roleModes, agentModeOf, validateTeam, type ProviderEntry } from "../shared/validate";
 
 
@@ -56,26 +57,56 @@ function plannerProvider(entries: readonly ProviderEntry[]): string {
 
 export async function teamlessProjects(_input: RpcInput<typeof teamProjectsRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamProjectsRpc>> {
   const projects = await allProjects(paseo);
-  const hasTeam = await Promise.all(projects.map((project) => access(join(project.root, TEAM_FILE)).then(() => true, () => false)));
+  const hasTeam = await Promise.all(projects.map(async (project) => (await teamFileNames(project)).length > 0));
   return projectsWithoutTeam(projects, new Set(projects.filter((_, at) => hasTeam[at]).map((project) => project.id)));
 }
 
-/** The project's team file, or null when it has none. */
-async function teamFileText(project: ProjectRef): Promise<string | null> {
-  return readFile(join(project.root, TEAM_FILE), "utf8").catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") return null;
+/** The project's team files, relative to its root: the single-team file first, then the teams folder by name. */
+async function teamFileNames(project: ProjectRef): Promise<string[]> {
+  const legacy = await access(join(project.root, TEAM_FILE)).then(() => [TEAM_FILE], () => []);
+  const names = await readdir(join(project.root, TEAMS_DIR)).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return [];
     throw error;
   });
+  return [...legacy, ...names.filter((name) => name.endsWith(".json")).sort().map((name) => `${TEAMS_DIR}/${name}`)];
+}
+
+/** Every team of the project, the names of all its team files, and the problems of those that don't parse. */
+async function projectTeams(project: ProjectRef): Promise<{ teams: TeamFile[]; names: string[]; errors: string[] }> {
+  const names = await teamFileNames(project);
+  const teams: TeamFile[] = [];
+  const errors: string[] = [];
+  for (const file of names) {
+    const parsed = parseTeam(await readFile(join(project.root, file), "utf8"));
+    if (parsed.ok) teams.push({ file, team: parsed.team });
+    else errors.push(...parsed.errors.map((error) => `${file}: ${error}`));
+  }
+  return { teams, names, errors };
+}
+
+async function workspaceTitle(paseo: PaseoApi, workspaceId: string): Promise<string> {
+  const workspace = (await paseo.workspaces.list()).entries.find((entry) => entry.id === workspaceId);
+  if (!workspace) throw new Error(`Workspace ${workspaceId} was not found.`);
+  return workspaceLabel(workspace);
 }
 
 export async function readTeam(target: RpcInput<typeof teamReadRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamReadRpc>> {
   const project = await projectOf(paseo, target);
   const catalog = catalogFrom(await providerEntries(paseo));
-  const text = await teamFileText(project);
-  if (text === null) return { project, team: null, errors: [], validation: [], catalog };
-  const parsed = parseTeam(text);
-  if (!parsed.ok) return { project, team: null, errors: parsed.errors, validation: [], catalog };
-  return { project, team: parsed.team, errors: [], validation: validateTeam(parsed.team, catalog), catalog };
+  const { teams, errors } = await projectTeams(project);
+  const workspace = "workspaceId" in target ? await workspaceTitle(paseo, target.workspaceId) : null;
+  const own = workspace === null ? undefined : teamIn(teams, workspace);
+  return {
+    project,
+    workspace,
+    file: own?.file ?? null,
+    team: own?.team ?? null,
+    owner: workspace === null || own ? null : (roleOwnerOf(teams, workspace) ?? null),
+    takenWorkspaces: workspacesOfOtherTeams(teams, workspace ?? ""),
+    errors,
+    validation: own ? validateTeam(own.team, catalog) : [],
+    catalog,
+  };
 }
 
 export async function proposeTeam({ goal, ...target }: RpcInput<typeof teamProposeRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamProposeRpc>> {
@@ -141,41 +172,6 @@ async function archivePlanners(paseo: PaseoApi, targets: { agents: string[]; wor
   return failures;
 }
 
-const FIRST_PROMPT = `Read ${TEAM_FILE}, then reply with a short summary of the team (role, workspace, provider/model) and say you are ready for a request. Do not start any agents yet.`;
-
-/** Starts an orchestrator for the team in the workspace; away from the team's home every role is shared there. */
-async function startOrchestrator(paseo: PaseoApi, team: Team, providers: readonly ProviderEntry[], workspaceId: string, placement: { home: boolean; workspace: string }) {
-  return paseo.workspaces.ref(workspaceId).agents.create({
-    config: { provider: `${team.orchestrator.provider}/${team.orchestrator.model}`, modeId: agentModeOf(providers, team.orchestrator.provider), systemPrompt: orchestratorPrompt(team, roleModes(team, providers), placement) },
-    title: "Orchestrator",
-    prompt: FIRST_PROMPT,
-    labels: { [LABEL]: "orchestrator" },
-  });
-}
-
-/** Runs the project's team in this workspace: reuses a matching orchestrator there, else starts one. Creates no workspace. */
-export async function startTeamHere({ workspaceId }: RpcInput<typeof teamStartHereRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamStartHereRpc>> {
-  const project = await projectOf(paseo, { workspaceId });
-  const text = await teamFileText(project);
-  if (text === null) return { ok: false, errors: [`${TEAM_FILE} was not found in ${project.root}`] };
-  const parsed = parseTeam(text);
-  if (!parsed.ok) return { ok: false, errors: parsed.errors };
-  const team = parsed.team;
-  const providers = await providerEntries(paseo);
-  const problems = validateTeam(team, catalogFrom(providers));
-  if (problems.length) return { ok: false, errors: problems.map((problem) => `${problem.target}: ${problem.message}`) };
-
-  const workspace = (await paseo.workspaces.list()).entries.find((entry) => entry.id === workspaceId);
-  if (!workspace) return { ok: false, errors: [`Workspace ${workspaceId} was not found.`] };
-  const title = workspaceLabel(workspace);
-  const home = title.trim().toLowerCase() === team.orchestrator.workspace.trim().toLowerCase();
-  const agents = (await paseo.agents.list()).entries.map((entry) => entry.agent);
-  const running = findOrchestrator(agents, workspaceId, team, agentModeOf(providers, team.orchestrator.provider));
-  if (running) return { ok: true, orchestratorAgentId: running.id, created: false };
-  const orchestrator = await startOrchestrator(paseo, team, providers, workspaceId, { home, workspace: title });
-  return { ok: true, orchestratorAgentId: orchestrator.id, created: true };
-}
-
 export async function applyTeam({ team: input, ...target }: RpcInput<typeof teamApplyRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamApplyRpc>> {
   const checked = checkTeam(input);
   if (!checked.ok) return { ok: false, errors: checked.errors };
@@ -185,7 +181,12 @@ export async function applyTeam({ team: input, ...target }: RpcInput<typeof team
   if (problems.length) return { ok: false, errors: problems.map((problem) => `${problem.target}: ${problem.message}`) };
 
   const project = await projectOf(paseo, target);
-  const file = join(project.root, TEAM_FILE);
+  const { teams, names } = await projectTeams(project);
+  // Teams never share a workspace, so one team's role sessions can't mix with another's.
+  const clashes = workspaceClashes(team, workspacesOfOtherTeams(teams, team.orchestrator.workspace));
+  if (clashes.length) return { ok: false, errors: clashes.map((problem) => `${problem.target}: ${problem.message}`) };
+  const relative = teamFileFor(team, teams, names);
+  const file = join(project.root, relative);
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, serializeTeam(team), "utf8");
 
@@ -199,14 +200,15 @@ export async function applyTeam({ team: input, ...target }: RpcInput<typeof team
   // Applying again keeps the orchestrator already running on the same model and mode and tells it to re-read the team.
   const agents = (await paseo.agents.list()).entries.map((entry) => entry.agent);
   const running = findOrchestrator(agents, lead.id, team, orchestratorMode);
-  if (running) await paseo.agents.ref(running.id).send(teamChangedMessage(team, modes));
-  const orchestratorAgentId = running?.id ?? (await startOrchestrator(paseo, team, providers, lead.id, { home: true, workspace: lead.workspace })).id;
-  // Orchestrators started in other workspaces run the same team there, so they re-read it too.
-  for (const other of projectOrchestrators(agents, existing.map((workspace) => workspace.id))) {
-    if (other.id === orchestratorAgentId) continue;
-    const workspace = existing.find((entry) => entry.id === other.workspaceId)!;
-    const placement = { home: workspace.id === lead.id, workspace: workspaceLabel(workspace) };
-    await paseo.agents.ref(other.id).send(teamChangedMessage(team, modes, placement));
+  if (running) {
+    await paseo.agents.ref(running.id).send(teamChangedMessage(team, modes, relative));
+    return { ok: true, file, workspaces, orchestratorAgentId: running.id, cleanup: await archivePlanners(paseo, plannerCleanup(existing, agents, team)) };
   }
-  return { ok: true, file, workspaces, orchestratorAgentId, cleanup: await archivePlanners(paseo, plannerCleanup(existing, agents, team)) };
+  const orchestrator = await paseo.workspaces.ref(lead.id).agents.create({
+    config: { provider: `${team.orchestrator.provider}/${team.orchestrator.model}`, modeId: orchestratorMode, systemPrompt: orchestratorPrompt(team, modes, relative) },
+    title: "Orchestrator",
+    prompt: `Read ${relative}, then reply with a short summary of the team (role, workspace, provider/model) and say you are ready for a request. Do not start any agents yet.`,
+    labels: { [LABEL]: "orchestrator" },
+  });
+  return { ok: true, file, workspaces, orchestratorAgentId: orchestrator.id, cleanup: await archivePlanners(paseo, plannerCleanup(existing, agents, team)) };
 }

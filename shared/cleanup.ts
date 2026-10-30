@@ -39,17 +39,6 @@ export interface OrchestratorCandidate extends AgentRef {
   currentModeId?: string | null;
 }
 
-/** The unarchived orchestrators in the given workspaces, in agent order. */
-export function projectOrchestrators(agents: readonly OrchestratorCandidate[], workspaceIds: readonly string[]): OrchestratorCandidate[] {
-  const ids = new Set(workspaceIds);
-  return agents.filter((agent) => ids.has(agent.workspaceId ?? "") && agent.labels[LABEL] === "orchestrator" && !agent.archivedAt);
-}
-
-/** The first unarchived orchestrator in the workspace. */
-export function orchestratorIn(agents: readonly OrchestratorCandidate[], workspaceId: string): OrchestratorCandidate | undefined {
-  return projectOrchestrators(agents, [workspaceId])[0];
-}
-
 /** The running orchestrator in the lead workspace on the team's provider/model and, when given, mode. */
 export function findOrchestrator(agents: readonly OrchestratorCandidate[], workspaceId: string, team: Team, modeId: string | undefined): OrchestratorCandidate | undefined {
   return agents.find(

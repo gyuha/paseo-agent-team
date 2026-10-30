@@ -14,9 +14,11 @@ For example, in a game project, design work can go to Codex, sound to Antigravit
 | **Workspace** | A Paseo workspace in that project. Each role works in its own workspace. |
 | **Role** | A name plus the provider, model, folders and instructions for one workspace, for example `design → codex/gpt-6.1-sol`. |
 | **Orchestrator** | The agent that reads the team and delegates each part of a request to the role that owns it. |
-| **Team definition** | The file `.agents/team.json` at the project root. It is the source of truth for the team and is meant to be committed. |
+| **Team definition** | One file per team in `.agents/teams/` at the project root, or the single file `.agents/team.json`. It is the source of truth for the team and is meant to be committed. |
 
 The team lives in the repository rather than in plugin settings, so it is shared through git and readable by agents. Workspaces are matched by title, not by ID, so the same file works on any machine.
+
+A project can run several teams, one per workspace. A team belongs to the workspace its orchestrator runs in, and the **Agent team** panel of a workspace shows that workspace's team. Teams never share a workspace: the orchestrator's workspace and every role's own workspace belong to one team only.
 
 ## Requirements
 
@@ -44,16 +46,16 @@ Or paste the absolute path of the checkout into **Settings → Plugins → Plugi
 
 Open a workspace in the project you want a team for, then:
 
-1. Open the Command Center and run **Create agent team**, or open the **Agent team** workspace panel.
+1. Open the Command Center and run **Create agent team**, or open the **Agent team** workspace panel. A team created from a workspace runs its orchestrator in that workspace.
 
-   Without an open workspace, for example on the New workspace screen, use **Create agent team** in the sidebar instead. It lists the projects that have no `.agents/team.json` yet; pick one and continue with step 2. The planner starts in an existing workspace of that project, or in a new `Team planner` workspace if it has none. After **Apply** you are taken to the orchestrator's workspace. The sidebar item is hidden once every project has a team.
+   Without an open workspace, for example on the New workspace screen, use **Create agent team** in the sidebar instead. It lists the projects that have no team yet; pick one and continue with step 2. The planner starts in an existing workspace of that project, or in a new `Team planner` workspace if it has none. After **Apply** you are taken to the orchestrator's workspace. The sidebar item is hidden once every project has a team.
 2. Describe the goal, for example `2D platformer game`, and press **Propose a team**. A planner agent looks at the repository and proposes roles using only the providers and models that are ready on this host. It takes a minute or two; **Open planner** shows its chat.
 3. Review the proposal. You can rename roles and workspaces, pick another provider or model, set the folders each role owns, edit instructions, and add or remove roles. To have AI add a role, describe a role in a sentence or two under the role list and press **Add role with AI**: a planner agent proposes one role (name, workspace, provider and model, folders, instructions) that avoids the existing roles' names and folders, and appends it for you to review. One role is created at a time, and the planner is archived with the others on **Apply**. Problems such as an unknown model are shown in red, and **Apply** stays disabled until they are fixed.
 4. Press **Apply**.
 
 To skip the planner, press **Start with an empty team** and fill in the roles yourself.
 
-Applying does four things in order. It writes `.agents/team.json`, makes sure every role that has its own workspace has one, starts the orchestrator, and cleans up the planners. An existing workspace with the same title is reused, and a missing one is created in the project. Applying again tells every running orchestrator in the project to re-read the team instead of starting a second one; none is archived. A role whose workspace is empty gets none and runs in the orchestrator's workspace. If a role is switched from its own workspace to shared, Apply leaves the old workspace and its sessions alone; archive them yourself if you no longer need them.
+Applying does four things in order. It writes the team's file, makes sure every role that has its own workspace has one, starts the orchestrator, and cleans up the planners. A new team is written to `.agents/teams/<orchestrator workspace>.json`; a team that already has a file, including `.agents/team.json`, keeps it. An existing workspace with the same title is reused, and a missing one is created in the project. Applying again tells the team's running orchestrator to re-read the team instead of starting a second one; none is archived. Apply refuses a team that uses a workspace another team of the project already uses. A role whose workspace is empty gets none and runs in the orchestrator's workspace. If a role is switched from its own workspace to shared, Apply leaves the old workspace and its sessions alone; archive them yourself if you no longer need them.
 
 Cleanup archives every planner agent left in the project, including ones from proposals you cancelled. A `Team planner` workspace is archived too, but only when the team doesn't use it and no other agent is left in it. If cleanup fails, the team is still applied and the failure is shown as a warning.
 
@@ -66,7 +68,7 @@ flowchart TD
   D --> E
   E --> F{Valid?}
   F -->|No| E
-  F -->|Yes| G[Write .agents/team.json]
+  F -->|Yes| G[Write the team's file]
   G --> H{Workspace with this title exists?}
   H -->|Yes| I[Reuse it]
   H -->|No| J[Create it in the project]
@@ -99,7 +101,7 @@ Your request → Orchestrator splits it by role → each role's agent works in i
 
 ### 3. Change the team
 
-Either open the **Agent team** panel, press **Edit**, change the team and press **Apply**, or edit `.agents/team.json` directly and press **Apply again** in the panel. The panel shows the current team and flags any provider or model the host can't run.
+Either open the **Agent team** panel in the team's orchestrator workspace, press **Edit**, change the team and press **Apply**, or edit the team's file directly and press **Apply again** in the panel. The panel shows the file's path. The panel shows the current team and flags any provider or model the host can't run.
 
 ### 4. Watch the agents
 
@@ -111,13 +113,18 @@ The capture shows the orchestrator as the root card, with four role agents under
 
 Each card shows the provider logo, the role or caption, the title, and the model, effort (thinking option) and permission mode chips. When an agent has no effort set, its effort chip shows the model's default effort from the provider, dimmed. The badge is **!** when the agent is waiting for a permission or has failed, an amber pulsing dot while it runs, and ✓ when it has finished. Lines to running agents turn into animated red dashes with moving signal dots. An agent that is not running itself but has a running agent below it, such as an orchestrator waiting on its role agents, gets an amber border without the glow. Press a card to open that agent. Closed and archived agents are hidden unless **Show closed** is on.
 
-### 5. Start the team here
+### 5. Run another team in another workspace
 
-In the **Agent team** panel of any workspace in the project, press **Start the team here** (**이 워크스페이스에서 팀 시작** in Korean) to start an orchestrator in that workspace from the same `.agents/team.json`. The button appears only while that workspace has no orchestrator yet. This team runs every role as a shared session inside that workspace, even for roles that have their own workspace in the team file. Only the default team, in the orchestrator's workspace, uses the role workspaces.
+Open the **Agent team** panel in a workspace that has no team yet and create one as in step 1. Its orchestrator runs in that workspace, and the team is written to its own file in `.agents/teams/`. Each team's orchestrator reads only its own file, so the teams don't change each other. The panel of a workspace that is a role's own workspace in another team says so instead of offering to create a team.
+
+```
+Workspace A panel → team A (.agents/teams/a.json) → orchestrator in A
+Workspace B panel → team B (.agents/teams/b.json) → orchestrator in B
+```
 
 ## Team definition format
 
-`.agents/team.json`:
+`.agents/teams/<orchestrator workspace>.json`, or `.agents/team.json`:
 
 ```json
 {
@@ -149,11 +156,11 @@ In the **Agent team** panel of any workspace in the project, press **Start the t
 | --- | --- | --- |
 | `version` | yes | Always `1`. |
 | `goal` | no | What the team is for. Shown to the orchestrator. |
-| `orchestrator.workspace` | yes | Workspace title for the orchestrator. |
+| `orchestrator.workspace` | yes | Workspace title for the orchestrator. The team belongs to this workspace, and no two teams of a project may use the same one. |
 | `orchestrator.provider`, `.model` | yes | Provider ID and model ID, as listed by `paseo provider models <provider>`. |
 | `roles[]` | yes | At least one role. |
 | `roles[].name` | yes | Unique, case-insensitive. |
-| `roles[].workspace` | no | Workspace title. Empty means the role shares the orchestrator's workspace, and its sessions are found there by the `role=<name>` label. A title set here may be used only once, including the orchestrator's. New proposals and roles added in the editor leave it empty. |
+| `roles[].workspace` | no | Workspace title. Empty means the role shares the orchestrator's workspace, and its sessions are found there by the `role=<name>` label. A title set here may be used only once, including the orchestrator's, and not by another team of the project. New proposals and roles added in the editor leave it empty. |
 | `roles[].provider`, `.model` | yes | Must be ready on the host when you apply. |
 | `roles[].folders` | no | Folders the role owns. Empty means no limit. The orchestrator keeps roles inside them and runs overlapping work one after another. |
 | `roles[].instructions` | no | Extra guidance for that role. |
@@ -165,6 +172,7 @@ The plugin's UI follows Paseo's app language. English is the default and Korean 
 ## Limitations
 
 - A role's model applies to agents started by the orchestrator or this plugin. Agents you start yourself in a role's workspace from Paseo's own UI still use whatever model you pick there.
+- A team's file is matched to its workspace by `orchestrator.workspace`. Renaming that workspace in Paseo or in the file detaches the team from it until the two match again. Workspaces for roles of other teams are not offered to the planner, so a proposal can still collide with them; the panel flags the collision before Apply.
 - A role without its own workspace runs its sessions in the orchestrator's workspace, so its agents sit beside the orchestrator there. Switching a role from its own workspace to shared does not archive the old workspace or its sessions.
 - Role workspaces are local workspaces of the same checkout, so they share one folder. Keep roles to separate folders, or have the orchestrator run overlapping work in sequence.
 - The planner, the orchestrator and the role agents start in the provider's reviewed auto mode when it has one: Codex's Auto-review (`auto-review`), otherwise an `auto` mode such as Claude's Auto mode (`auto`). Only a provider with neither uses its unattended mode: the one marked unattended, otherwise the one Paseo marks dangerous, such as Antigravity's Full access. Otherwise they use the default mode. The unattended mode keeps running without asking you; Auto mode and Auto-review route permission requests through an automatic reviewer instead. The planner is told not to change files but is not technically prevented from doing so.
