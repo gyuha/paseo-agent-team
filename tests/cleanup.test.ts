@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { plannerCleanup } from "../shared/cleanup";
+import { findOrchestrator, plannerCleanup, type OrchestratorCandidate } from "../shared/cleanup";
 import type { Team } from "../shared/team";
 
 const team: Team = {
@@ -43,5 +43,48 @@ describe("plannerCleanup", () => {
 
   it("archives an empty Team planner workspace", () => {
     expect(plannerCleanup([workspace("wks_plan", "Team planner")], [], team)).toEqual({ agents: [], workspaces: ["wks_plan"] });
+  });
+});
+
+describe("findOrchestrator", () => {
+  const orchestrator = (over: Partial<OrchestratorCandidate> = {}): OrchestratorCandidate => ({
+    id: "o1",
+    workspaceId: "wks_lead",
+    labels: { "workspace-agents": "orchestrator" },
+    archivedAt: null,
+    provider: "claude",
+    model: "claude-opus-5-5",
+    currentModeId: "bypassPermissions",
+    ...over,
+  });
+
+  it("reuses an orchestrator whose provider, model and mode match", () => {
+    expect(findOrchestrator([orchestrator()], "wks_lead", team, "bypassPermissions")?.id).toBe("o1");
+  });
+
+  it("returns undefined when only the mode differs", () => {
+    expect(findOrchestrator([orchestrator({ currentModeId: "default" })], "wks_lead", team, "bypassPermissions")).toBeUndefined();
+  });
+
+  it("ignores the mode when modeId is undefined", () => {
+    expect(findOrchestrator([orchestrator({ currentModeId: "default" })], "wks_lead", team, undefined)?.id).toBe("o1");
+    expect(findOrchestrator([orchestrator({ currentModeId: null })], "wks_lead", team, undefined)?.id).toBe("o1");
+  });
+
+  it("returns undefined when provider or model differ", () => {
+    expect(findOrchestrator([orchestrator({ provider: "codex" })], "wks_lead", team, undefined)).toBeUndefined();
+    expect(findOrchestrator([orchestrator({ model: "other" })], "wks_lead", team, undefined)).toBeUndefined();
+  });
+
+  it("ignores archived, other-workspace and non-orchestrator agents", () => {
+    const agents = [
+      orchestrator({ id: "archived", archivedAt: "2026-10-29T00:00:00Z" }),
+      orchestrator({ id: "elsewhere", workspaceId: "wks_other" }),
+      orchestrator({ id: "planner", labels: { "workspace-agents": "planner" } }),
+      orchestrator({ id: "unlabeled", labels: {} }),
+      orchestrator({ id: "good" }),
+    ];
+    expect(findOrchestrator(agents, "wks_lead", team, "bypassPermissions")?.id).toBe("good");
+    expect(findOrchestrator(agents.slice(0, 4), "wks_lead", team, "bypassPermissions")).toBeUndefined();
   });
 });

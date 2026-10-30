@@ -31,3 +31,23 @@ export function plannerCleanup(workspaces: readonly WorkspaceRef[], agents: read
   );
   return { agents: planners.map((agent) => agent.id), workspaces: emptied.map((workspace) => workspace.id) };
 }
+
+/** An agent as orchestrator reuse needs it. */
+export interface OrchestratorCandidate extends AgentRef {
+  provider: string;
+  model: string | null;
+  currentModeId?: string | null;
+}
+
+/** The running orchestrator in the lead workspace on the team's provider/model and, when given, mode. */
+export function findOrchestrator(agents: readonly OrchestratorCandidate[], workspaceId: string, team: Team, modeId: string | undefined): OrchestratorCandidate | undefined {
+  return agents.find(
+    (agent) =>
+      agent.workspaceId === workspaceId &&
+      agent.labels[LABEL] === "orchestrator" &&
+      !agent.archivedAt &&
+      agent.provider === team.orchestrator.provider &&
+      agent.model === team.orchestrator.model &&
+      (modeId === undefined || agent.currentModeId === modeId),
+  );
+}

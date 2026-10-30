@@ -3,13 +3,13 @@ import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { ensureWorkspaces, planWorkspaces } from "../shared/apply-plan";
-import { LABEL, PLANNER_WORKSPACE, plannerCleanup } from "../shared/cleanup";
-import { orchestratorPrompt } from "../shared/prompt";
+import { findOrchestrator, LABEL, PLANNER_WORKSPACE, plannerCleanup } from "../shared/cleanup";
+import { orchestratorPrompt, teamChangedMessage } from "../shared/prompt";
 import { extractProposal, extractRole, plannerPrompt, ROLE_JSON_SCHEMA, rolePrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
 import { plannerWorkspace, projectsWithoutTeam, type ProjectRef } from "../shared/projects";
 import type { teamApplyRpc, teamProjectsRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRoleProposalRpc, teamRoleProposeRpc } from "../shared/rpc";
 import { checkTeam, parseTeam, serializeTeam, TEAM_FILE } from "../shared/team";
-import { autoModeOf, catalogFrom, validateTeam, type ProviderEntry } from "../shared/validate";
+import { catalogFrom, roleModes, agentModeOf, validateTeam, type ProviderEntry } from "../shared/validate";
 
 
 type PaseoApi = PluginHandlerContext["paseo"];
@@ -77,7 +77,7 @@ export async function proposeTeam({ goal, ...target }: RpcInput<typeof teamPropo
   const entries = await providerEntries(paseo);
   const provider = plannerProvider(entries);
   const agent = await paseo.workspaces.ref(await plannerWorkspaceOf(paseo, target)).agents.create({
-    config: { provider, modeId: autoModeOf(entries, provider.split("/")[0]!) },
+    config: { provider, modeId: agentModeOf(entries, provider.split("/")[0]!) },
     title: "Team planner",
     prompt: plannerPrompt(goal, catalogFrom(entries)),
     outputSchema: TEAM_JSON_SCHEMA,
@@ -107,7 +107,7 @@ export async function proposeRole({ description, team, ...target }: RpcInput<typ
   const entries = await providerEntries(paseo);
   const provider = plannerProvider(entries);
   const agent = await paseo.workspaces.ref(await plannerWorkspaceOf(paseo, target)).agents.create({
-    config: { provider, modeId: autoModeOf(entries, provider.split("/")[0]!) },
+    config: { provider, modeId: agentModeOf(entries, provider.split("/")[0]!) },
     title: "Role planner",
     prompt: rolePrompt(description, team, catalogFrom(entries)),
     outputSchema: ROLE_JSON_SCHEMA,
@@ -154,15 +154,17 @@ export async function applyTeam({ team: input, ...target }: RpcInput<typeof team
   const workspaces = await ensureWorkspaces(planWorkspaces(team, existing), async (title) => (await paseo.workspaces.create({ title, source: { kind: "directory", path: project.root, projectId: project.id } })).id);
 
   const lead = workspaces[0]!;
-  // Applying again keeps the orchestrator already running on the same model and tells it to re-read the team.
+  const modes = roleModes(team, providers);
+  const orchestratorMode = agentModeOf(providers, team.orchestrator.provider);
+  // Applying again keeps the orchestrator already running on the same model and mode and tells it to re-read the team.
   const agents = (await paseo.agents.list()).entries.map((entry) => entry.agent);
-  const running = agents.find((agent) => agent.workspaceId === lead.id && agent.labels[LABEL] === "orchestrator" && !agent.archivedAt && agent.provider === team.orchestrator.provider && agent.model === team.orchestrator.model);
+  const running = findOrchestrator(agents, lead.id, team, orchestratorMode);
   if (running) {
-    await paseo.agents.ref(running.id).send(`The team in ${TEAM_FILE} changed. Re-read it and use it from now on.`);
+    await paseo.agents.ref(running.id).send(teamChangedMessage(team, modes));
     return { ok: true, file, workspaces, orchestratorAgentId: running.id, cleanup: await archivePlanners(paseo, plannerCleanup(existing, agents, team)) };
   }
   const orchestrator = await paseo.workspaces.ref(lead.id).agents.create({
-    config: { provider: `${team.orchestrator.provider}/${team.orchestrator.model}`, modeId: autoModeOf(providers, team.orchestrator.provider), systemPrompt: orchestratorPrompt(team) },
+    config: { provider: `${team.orchestrator.provider}/${team.orchestrator.model}`, modeId: orchestratorMode, systemPrompt: orchestratorPrompt(team, modes) },
     title: "Orchestrator",
     prompt: `Read ${TEAM_FILE}, then reply with a short summary of the team (role, workspace, provider/model) and say you are ready for a request. Do not start any agents yet.`,
     labels: { [LABEL]: "orchestrator" },

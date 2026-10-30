@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyTeam, proposeRole, teamlessProjects, proposeTeam, readTeam, roleProposal, teamProposal } from "../server/team";
 import { TEAM_FILE, TeamSchema, type Team } from "../shared/team";
-import { validateTeam } from "../shared/validate";
+import { agentModeOf, validateTeam } from "../shared/validate";
 
 describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemon", () => {
   let paseo: PaseoClient;
@@ -100,6 +100,9 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     const orchestrator = await paseo.agents.ref(result.orchestratorAgentId).refresh();
     expect(orchestrator?.agent.workspaceId).toBe(result.workspaces[0]!.id);
     expect(orchestrator?.agent.provider).toBe(proposed.orchestrator.provider);
+    const orchestratorMode = agentModeOf((await paseo.providers.snapshot()).entries, proposed.orchestrator.provider);
+    if (proposed.orchestrator.provider === "claude") expect(orchestratorMode).toBeDefined();
+    if (orchestratorMode) expect(orchestrator?.agent.currentModeId).toBe(orchestratorMode);
 
     // Planners are archived, and so is the emptied Team planner workspace; the team's workspaces stay.
     const projectWorkspaces = (await paseo.workspaces.list()).entries.filter((entry) => entry.projectId === projectId && !entry.archivingAt).map((entry) => entry.id);

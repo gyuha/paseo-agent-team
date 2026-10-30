@@ -1,12 +1,34 @@
 import { describe, expect, it } from "vitest";
 import type { Team } from "../shared/team";
-import { autoModeOf, catalogFrom, validateTeam, type ProviderEntry } from "../shared/validate";
+import { catalogFrom, roleModes, agentModeOf, validateTeam, type ProviderEntry } from "../shared/validate";
 
 const entries: ProviderEntry[] = [
-  { provider: "claude", enabled: true, status: "ready", models: [{ id: "claude-opus-5-5", label: "Opus 5.5" }], modes: [{ id: "default" }, { id: "auto" }] },
-  { provider: "codex", enabled: true, status: "ready", modes: [{ id: "auto-review" }], models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol" }, { id: "hidden", label: "Hidden", isSelectable: false }] },
-  { provider: "antigravity", enabled: true, status: "ready", models: [{ id: "gemini-4-argon-high", label: "Gemini 4 Argon (High)" }] },
-  { provider: "copilot", enabled: true, status: "unavailable", models: [{ id: "gpt-x", label: "x" }] },
+  {
+    provider: "claude",
+    enabled: true,
+    status: "ready",
+    models: [{ id: "claude-opus-5-5", label: "Opus 5.5" }],
+    modes: [
+      { id: "plan", colorTier: "planning" },
+      { id: "default", colorTier: "safe" },
+      { id: "acceptEdits", colorTier: "moderate" },
+      { id: "auto", colorTier: "moderate" },
+      { id: "bypassPermissions", colorTier: "dangerous" },
+    ],
+  },
+  {
+    provider: "codex",
+    enabled: true,
+    status: "ready",
+    modes: [
+      { id: "auto", colorTier: "moderate" },
+      { id: "auto-review", colorTier: "moderate" },
+      { id: "full-access", colorTier: "dangerous" },
+    ],
+    models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol" }, { id: "hidden", label: "Hidden", isSelectable: false }],
+  },
+  { provider: "antigravity", enabled: true, status: "ready", modes: [{ id: "full-access", isUnattended: true, colorTier: "dangerous" }], models: [{ id: "gemini-4-argon-high", label: "Gemini 4 Argon (High)" }] },
+  { provider: "copilot", enabled: true, status: "unavailable", modes: [{ id: "default", colorTier: "safe" }, { id: "bypassPermissions", colorTier: "dangerous" }], models: [{ id: "gpt-x", label: "x" }] },
   { provider: "omp", enabled: false, status: "ready", models: [{ id: "m", label: "m" }] },
 ];
 
@@ -62,11 +84,57 @@ describe("validateTeam", () => {
   });
 });
 
-describe("autoModeOf", () => {
-  it("returns auto only for providers that offer it", () => {
-    expect(autoModeOf(entries, "claude")).toBe("auto");
-    expect(autoModeOf(entries, "codex")).toBeUndefined();
-    expect(autoModeOf(entries, "antigravity")).toBeUndefined();
-    expect(autoModeOf(entries, "gemini")).toBeUndefined();
+describe("agentModeOf", () => {
+  it("picks auto for claude", () => {
+    expect(agentModeOf(entries, "claude")).toBe("auto");
+  });
+
+  it("picks auto-review before auto for codex, whose own auto prompts", () => {
+    expect(agentModeOf(entries, "codex")).toBe("auto-review");
+  });
+
+  it("falls back to the isUnattended mode", () => {
+    expect(agentModeOf(entries, "antigravity")).toBe("full-access");
+  });
+
+  it("falls back to the dangerous colorTier mode", () => {
+    expect(agentModeOf(entries, "copilot")).toBe("bypassPermissions");
+  });
+
+  it("returns undefined when the provider has no modes or is unknown", () => {
+    expect(agentModeOf(entries, "omp")).toBeUndefined();
+    expect(agentModeOf(entries, "gemini")).toBeUndefined();
+  });
+
+  it("returns undefined when no mode matches any rule", () => {
+    const plain: ProviderEntry[] = [{ provider: "plain", enabled: true, status: "ready", modes: [{ id: "default", colorTier: "safe" }, { id: "plan", colorTier: "planning" }] }];
+    expect(agentModeOf(plain, "plain")).toBeUndefined();
+  });
+
+  describe("precedence", () => {
+    const mixed = (modes: NonNullable<ProviderEntry["modes"]>): ProviderEntry[] => [{ provider: "p", enabled: true, status: "ready", modes }];
+
+    it("prefers auto-review over auto, isUnattended and dangerous", () => {
+      expect(agentModeOf(mixed([{ id: "risky", colorTier: "dangerous" }, { id: "free", isUnattended: true }, { id: "auto" }, { id: "auto-review" }]), "p")).toBe("auto-review");
+    });
+
+    it("prefers auto over isUnattended and dangerous", () => {
+      expect(agentModeOf(mixed([{ id: "risky", colorTier: "dangerous" }, { id: "free", isUnattended: true }, { id: "auto" }]), "p")).toBe("auto");
+    });
+
+    it("prefers isUnattended over a different dangerous mode", () => {
+      expect(agentModeOf(mixed([{ id: "risky", colorTier: "dangerous" }, { id: "chosen", isUnattended: true, colorTier: "moderate" }]), "p")).toBe("chosen");
+    });
+  });
+});
+
+describe("roleModes", () => {
+  it("maps each role name to its provider's agent mode", () => {
+    expect(roleModes(team, entries)).toEqual({ design: "auto-review", sound: "full-access" });
+  });
+
+  it("leaves a role without a mode undefined", () => {
+    const noModes = { ...team, roles: [{ ...team.roles[0]!, provider: "omp" }] };
+    expect(roleModes(noModes, entries)).toEqual({ design: undefined });
   });
 });

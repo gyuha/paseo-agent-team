@@ -6,7 +6,7 @@ export interface ProviderEntry {
   enabled: boolean;
   status: string;
   models?: readonly { id: string; label: string; isSelectable?: boolean }[];
-  modes?: readonly { id: string }[];
+  modes?: readonly { id: string; isUnattended?: boolean; colorTier?: string }[];
 }
 
 export interface ProviderInfo {
@@ -22,9 +22,25 @@ export interface TeamError {
   message: string;
 }
 
-/** "auto" when the provider offers Auto mode, so new agents start in it instead of the provider's default. */
-export function autoModeOf(entries: readonly ProviderEntry[], provider: string): string | undefined {
-  return entries.find((entry) => entry.provider === provider)?.modes?.some((mode) => mode.id === "auto") ? "auto" : undefined;
+/**
+ * The mode new agents start in instead of the provider's default; first match wins: `auto-review`, `auto`, the mode
+ * flagged `isUnattended`, then the first `dangerous` one (claude and codex snapshots carry only `colorTier`).
+ * `auto-review` precedes `auto` because Codex's `auto` id is Default Permissions, which prompts, while Claude's `auto`
+ * and Codex's `auto-review` both auto-review approvals.
+ */
+export function agentModeOf(entries: readonly ProviderEntry[], provider: string): string | undefined {
+  const modes = entries.find((entry) => entry.provider === provider)?.modes ?? [];
+  return (
+    modes.find((mode) => mode.id === "auto-review") ??
+    modes.find((mode) => mode.id === "auto") ??
+    modes.find((mode) => mode.isUnattended === true) ??
+    modes.find((mode) => mode.colorTier === "dangerous")
+  )?.id;
+}
+
+/** Each role's agent mode, keyed by role name. */
+export function roleModes(team: Team, entries: readonly ProviderEntry[]): Record<string, string | undefined> {
+  return Object.fromEntries(team.roles.map((role) => [role.name, agentModeOf(entries, role.provider)]));
 }
 
 /** The enabled providers and their selectable models. */

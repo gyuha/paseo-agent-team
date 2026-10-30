@@ -53,7 +53,7 @@ Open a workspace in the project you want a team for, then:
 
 To skip the planner, press **Start with an empty team** and fill in the roles yourself.
 
-Applying does four things in order. It writes `.agents/team.json`, makes sure every role has a workspace, starts the orchestrator, and cleans up the planners. An existing workspace with the same title is reused, and a missing one is created in the project. If an orchestrator is already running in its workspace on the same provider and model, it is kept and told to re-read the team instead of starting a second one.
+Applying does four things in order. It writes `.agents/team.json`, makes sure every role has a workspace, starts the orchestrator, and cleans up the planners. An existing workspace with the same title is reused, and a missing one is created in the project. If an orchestrator is already running in its workspace on the same provider, model and mode, it is kept and told to re-read the team instead of starting a second one. If any of the three differs, a new orchestrator starts and the old one keeps running; it is not archived.
 
 Cleanup archives every planner agent left in the project, including ones from proposals you cancelled. A `Team planner` workspace is archived too, but only when the team doesn't use it and no other agent is left in it. If cleanup fails, the team is still applied and the failure is shown as a warning.
 
@@ -70,7 +70,7 @@ flowchart TD
   G --> H{Workspace with this title exists?}
   H -->|Yes| I[Reuse it]
   H -->|No| J[Create it in the project]
-  I --> K{Orchestrator already running on the same model?}
+  I --> K{Orchestrator already running on the same provider, model and mode?}
   J --> K
   K -->|Yes| L[Tell it to re-read the team]
   K -->|No| M[Start the orchestrator]
@@ -152,7 +152,7 @@ The plugin's UI follows Paseo's app language. English is the default and Korean 
 
 - A role's model applies to agents started by the orchestrator or this plugin. Agents you start yourself in a role's workspace from Paseo's own UI still use whatever model you pick there.
 - Role workspaces are local workspaces of the same checkout, so they share one folder. Keep roles to separate folders, or have the orchestrator run overlapping work in sequence.
-- The planner, the orchestrator and the role agents start in Auto mode when their provider offers one (Claude does); other providers use their default mode. The planner is told not to change files but is not technically prevented from doing so.
+- The planner, the orchestrator and the role agents start in the provider's reviewed auto mode when it has one: Codex's Auto-review (`auto-review`), otherwise an `auto` mode such as Claude's Auto mode (`auto`). Only a provider with neither uses its unattended mode: the one marked unattended, otherwise the one Paseo marks dangerous, such as Antigravity's Full access. Otherwise they use the default mode. The unattended mode keeps running without asking you; Auto mode and Auto-review route permission requests through an automatic reviewer instead. The planner is told not to change files but is not technically prevented from doing so.
 - Paseo's sidebar puts a workspace it hasn't seen yet at the top of its project, so a new team lists the orchestrator first and the roles in team order. A workspace you already have keeps its place, so after applying a changed team, workspaces created for new roles appear above the orchestrator; drag them into place. The plugin cannot set the sidebar order.
 - Very long workspace or agent lists are read as a single page. On hosts with a lot of workspaces, an existing workspace could be missed and created again.
 
