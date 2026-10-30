@@ -51,3 +51,8 @@ export function findOrchestrator(agents: readonly OrchestratorCandidate[], works
       (modeId === undefined || agent.currentModeId === modeId),
   );
 }
+
+/** The unarchived orchestrators of the workspace, whatever their provider, model or mode; a restart archives them all. */
+export function orchestratorsToArchive(agents: readonly AgentRef[], workspaceId: string): string[] {
+  return agents.filter((agent) => agent.workspaceId === workspaceId && agent.labels[LABEL] === "orchestrator" && !agent.archivedAt).map((agent) => agent.id);
+}

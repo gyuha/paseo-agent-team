@@ -32,6 +32,22 @@ export const teamProjectsRpc = defineRpc({
   })),
 });
 
+/** For the agent dashboard: the teams of a workspace's project, with their roles' workspaces resolved to ids. */
+export const teamRosterRpc = defineRpc({
+  name: "team.roster",
+  input: z.object({ workspaceId: z.string() }),
+  output: z.object({
+    teams: z.array(z.object({
+      /** Null when the orchestrator's workspace doesn't exist. */
+      orchestratorWorkspaceId: z.string().nullable(),
+      /** A shared role's workspace is the orchestrator's; null when the role's own workspace doesn't exist yet. */
+      roles: z.array(z.object({ name: z.string(), provider: z.string(), model: z.string(), workspaceId: z.string().nullable() })),
+    })),
+    /** Problems reading or parsing the project's team files. */
+    errors: z.array(z.string()),
+  }),
+});
+
 /** The project (or a workspace's project), the team that runs in the workspace (if any) and what this host can run. */
 export const teamReadRpc = defineRpc({
   name: "team.read",
@@ -47,6 +63,8 @@ export const teamReadRpc = defineRpc({
     owner: z.object({ team: z.string(), role: z.string() }).nullable(),
     /** Workspace titles the project's other teams use; a team can't use them too. */
     takenWorkspaces: z.array(z.string()),
+    /** Titles of the project's workspaces; a new draft gets workspace names that aren't among them. */
+    projectWorkspaces: z.array(z.string()),
     /** Problems reading or parsing the project's team files. */
     errors: z.array(z.string()),
     /** Providers or models in the team file this host can't run. */
@@ -114,5 +132,15 @@ export const teamApplyRpc = defineRpc({
       /** The Claude settings file the orchestrator's `paseo run` allow rule was added to, or null when none was added. */
       permission: z.string().nullable(),
     }),
+  ]),
+});
+
+/** Archives the workspace's orchestrators and starts a new one from the team file on disk; role sessions are kept. */
+export const teamRestartOrchestratorRpc = defineRpc({
+  name: "team.restart-orchestrator",
+  input: TargetSchema,
+  output: z.discriminatedUnion("ok", [
+    z.object({ ok: z.literal(false), errors: z.array(z.string()) }),
+    z.object({ ok: z.literal(true), orchestratorAgentId: z.string(), archived: z.array(z.string()) }),
   ]),
 });

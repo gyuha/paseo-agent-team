@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ensureWorkspaces, planWorkspaces, workspaceLabel } from "../shared/apply-plan";
+import { ensureWorkspaces, freeWorkspace, planWorkspaces, withFreeWorkspaces, workspaceLabel } from "../shared/apply-plan";
 import type { Team } from "../shared/team";
 
 const team: Team = {
@@ -85,5 +85,40 @@ describe("ensureWorkspaces", () => {
       { target: "design", workspace: "Design", id: "wks_d", created: false },
       { target: "sound", workspace: "sound", id: "new_sound", created: true },
     ]);
+  });
+});
+
+describe("freeWorkspace", () => {
+  it("keeps a free name and numbers a taken one, ignoring case and spaces", () => {
+    expect(freeWorkspace("orchestrator", ["main"])).toBe("orchestrator");
+    expect(freeWorkspace("orchestrator", [" Orchestrator ", "orchestrator-2"])).toBe("orchestrator-3");
+  });
+});
+
+describe("withFreeWorkspaces", () => {
+  it("gives a new team's orchestrator a workspace the project doesn't have yet", () => {
+    const fresh: Team = { ...team, roles: [] };
+    expect(withFreeWorkspaces(fresh, ["orchestrator", "main"], { orchestrator: true }).orchestrator.workspace).toBe("orchestrator-2");
+  });
+
+  it("renames own role workspaces away from the project's and each other's, leaving shared roles alone", () => {
+    const draft: Team = {
+      ...team,
+      roles: [
+        { ...team.roles[0]!, workspace: "design" },
+        { ...team.roles[1]!, workspace: "" },
+        { ...team.roles[1]!, name: "music", workspace: "Design-2" },
+      ],
+    };
+    const result = withFreeWorkspaces(draft, ["Design", "orchestrator"], { orchestrator: true });
+    expect(result.orchestrator.workspace).toBe("orchestrator-2");
+    expect(result.roles.map((role) => role.workspace)).toEqual(["design-2", "", "Design-2-2"]);
+  });
+
+  it("keeps the orchestrator's workspace when it is fixed, and keeps role workspaces off it", () => {
+    const draft: Team = { ...team, orchestrator: { ...team.orchestrator, workspace: "main" }, roles: [{ ...team.roles[0]!, workspace: "main" }] };
+    const result = withFreeWorkspaces(draft, ["main"], { orchestrator: false });
+    expect(result.orchestrator.workspace).toBe("main");
+    expect(result.roles[0]!.workspace).toBe("main-2");
   });
 });

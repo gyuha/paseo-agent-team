@@ -39,7 +39,15 @@ export interface AgentNode {
   live: boolean;
   /** Not running itself, but a descendant is. */
   delegating: boolean;
+  /** A role of the team that has no session yet; its `agent` is a stand-in, not a Paseo agent. */
+  waiting: boolean;
   children: AgentNode[];
+}
+
+/** A team's roles, with the workspaces their sessions run in (null when the workspace doesn't exist yet). */
+export interface RosterTeam {
+  orchestratorWorkspaceId: string | null;
+  roles: { name: string; provider: string; model: string; workspaceId: string | null }[];
 }
 
 /** Roots that started other agents, and roots that did not. */
@@ -87,17 +95,43 @@ export function agentNode(agent: DashboardAgent, children: AgentNode[] = [], def
     badge: badgeOf(agent),
     live,
     delegating: !live && children.some((child) => child.live || child.delegating),
+    waiting: false,
     children,
   };
+}
+
+function waitingNode(orchestrator: DashboardAgent, role: RosterTeam["roles"][number]): AgentNode {
+  const stand = { id: `waiting:${orchestrator.id}:${role.name}`, workspaceId: role.workspaceId, provider: role.provider, model: role.model, title: role.name, status: "waiting", labels: { role: role.name }, createdAt: "" };
+  return { ...agentNode(stand), waiting: true };
+}
+
+/** Only the newest shown orchestrator of the team's workspace gets the team's roles. */
+function leadOf(scope: readonly DashboardAgent[], team: RosterTeam): DashboardAgent | undefined {
+  return scope
+    .filter((agent) => agent.labels[LABEL] === "orchestrator" && agent.workspaceId === team.orchestratorWorkspaceId && team.orchestratorWorkspaceId !== null)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+}
+
+/** Per orchestrator id, the waiting nodes of the roles of its team that no shown agent has taken yet. */
+function waitingRoles(scope: readonly DashboardAgent[], roster: readonly RosterTeam[]): Map<string, AgentNode[]> {
+  const result = new Map<string, AgentNode[]>();
+  for (const team of roster) {
+    const lead = leadOf(scope, team);
+    if (!lead) continue;
+    const taken = (role: RosterTeam["roles"][number]) => scope.some((agent) => agent.labels.role === role.name && role.workspaceId !== null && agent.workspaceId === role.workspaceId);
+    const nodes = team.roles.filter((role) => !taken(role)).map((role) => waitingNode(lead, role));
+    if (nodes.length) result.set(lead.id, nodes);
+  }
+  return result;
 }
 
 const newestFirst = (a: AgentNode, b: AgentNode) => b.agent.createdAt.localeCompare(a.agent.createdAt);
 
 /**
- * The agents in the given workspaces as parent → child trees. A child whose parent is not shown becomes a root,
- * and so does an agent caught in a parent cycle.
+ * The agents in the given workspaces as parent → child trees, with the roster's waiting roles after an orchestrator's children. A child whose parent is not shown becomes a root,
+ * and so does an agent caught in a parent cycle; a role session of a roster team is the exception and goes under the team's orchestrator.
  */
-export function buildAgentForest(agents: readonly DashboardAgent[], workspaceIds: readonly string[], options: { showClosed: boolean; defaultEfforts?: Record<string, string> }): AgentForest {
+export function buildAgentForest(agents: readonly DashboardAgent[], workspaceIds: readonly string[], options: { showClosed: boolean; defaultEfforts?: Record<string, string>; roster?: readonly RosterTeam[] }): AgentForest {
   const workspaces = new Set(workspaceIds);
   const scope = agents.filter((agent) => workspaces.has(agent.workspaceId ?? "") && (options.showClosed || !isHidden(agent)));
   const byId = new Map(scope.map((agent) => [agent.id, agent]));
@@ -110,14 +144,22 @@ export function buildAgentForest(agents: readonly DashboardAgent[], workspaceIds
     }
     return byId.has(parentOf(agent) ?? "");
   };
+  // A role session in a team's workspace whose parent is not shown (say, a cleared orchestrator) goes to the team's current orchestrator.
+  const leads = (options.roster ?? []).flatMap((team) => {
+    const lead = leadOf(scope, team);
+    return lead ? [{ lead, workspaces: new Set([team.orchestratorWorkspaceId, ...team.roles.map((role) => role.workspaceId)]) }] : [];
+  });
+  const adopter = (agent: DashboardAgent) => (agent.labels.role && parentOf(agent) !== undefined ? leads.find((team) => team.workspaces.has(agent.workspaceId ?? "")) : undefined)?.lead;
   const children = new Map<string, DashboardAgent[]>();
   const roots: DashboardAgent[] = [];
   for (const agent of scope) {
-    if (isChild(agent)) children.set(parentOf(agent)!, [...(children.get(parentOf(agent)!) ?? []), agent]);
+    const parent = isChild(agent) ? parentOf(agent) : adopter(agent)?.id;
+    if (parent !== undefined) children.set(parent, [...(children.get(parent) ?? []), agent]);
     else roots.push(agent);
   }
+  const waiting = waitingRoles(scope, options.roster ?? []);
   const build = (agent: DashboardAgent): AgentNode =>
-    agentNode(agent, (children.get(agent.id) ?? []).map(build).sort((a, b) => -newestFirst(a, b)), options.defaultEfforts?.[`${agent.provider}/${agent.model}`]);
+    agentNode(agent, [...(children.get(agent.id) ?? []).map(build).sort((a, b) => -newestFirst(a, b)), ...(waiting.get(agent.id) ?? [])], options.defaultEfforts?.[`${agent.provider}/${agent.model}`]);
   const nodes = roots.map(build);
   const trees = nodes.filter((node) => node.children.length).sort((a, b) => Number(b.kind === "orchestrator") - Number(a.kind === "orchestrator") || newestFirst(a, b));
   return { trees, solo: nodes.filter((node) => !node.children.length).sort(newestFirst) };

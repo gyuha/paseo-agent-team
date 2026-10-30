@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findOrchestrator, plannerCleanup, type OrchestratorCandidate } from "../shared/cleanup";
+import { findOrchestrator, orchestratorsToArchive, plannerCleanup, type OrchestratorCandidate } from "../shared/cleanup";
 import type { Team } from "../shared/team";
 
 const team: Team = {
@@ -86,5 +86,27 @@ describe("findOrchestrator", () => {
     ];
     expect(findOrchestrator(agents, "wks_lead", team, "bypassPermissions")?.id).toBe("good");
     expect(findOrchestrator(agents.slice(0, 4), "wks_lead", team, "bypassPermissions")).toBeUndefined();
+  });
+});
+
+describe("orchestratorsToArchive", () => {
+  it("picks the unarchived orchestrators of the workspace, both when there are two", () => {
+    const agents = [agent("a1", "wks_main", "orchestrator"), agent("a2", "wks_main", "orchestrator")];
+    expect(orchestratorsToArchive(agents, "wks_main")).toEqual(["a1", "a2"]);
+  });
+
+  it("leaves out agents without the label, in another workspace or already archived", () => {
+    const agents = [
+      { id: "plain", workspaceId: "wks_main", labels: {}, archivedAt: null },
+      agent("other", "wks_other", "orchestrator"),
+      agent("old", "wks_main", "orchestrator", "2026-10-29T00:00:00Z"),
+      agent("a1", "wks_main", "orchestrator"),
+    ];
+    expect(orchestratorsToArchive(agents, "wks_main")).toEqual(["a1"]);
+  });
+
+  it("leaves out planners and role sessions", () => {
+    const agents = [agent("p", "wks_main", "planner"), { id: "r", workspaceId: "wks_main", labels: { role: "design" }, archivedAt: null }];
+    expect(orchestratorsToArchive(agents, "wks_main")).toEqual([]);
   });
 });

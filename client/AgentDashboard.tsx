@@ -1,5 +1,5 @@
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { usePaseo, useTabState, useTranslation } from "@getpaseo/plugin/client";
+import { usePaseo, useRpc, useTabState, useTranslation } from "@getpaseo/plugin/client";
 import { Icon, Loading } from "@getpaseo/plugin/client/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -15,6 +15,7 @@ import {
 import { z } from "zod";
 import { buildAgentForest, type AgentNode } from "../shared/agent-tree";
 import { providerIcon } from "../shared/provider-icons";
+import { teamRosterRpc } from "../shared/rpc";
 import { messages } from "./i18n";
 
 const RED = "#ff5a5f";
@@ -35,6 +36,7 @@ type TreeProps = {
   phase?: Animated.AnimatedModulo<number>;
   open?: (id: string) => void;
   caption: (node: AgentNode) => string;
+  waitingLabel: string;
 };
 
 function Logo({
@@ -88,7 +90,16 @@ function Badge({
   node,
   colors,
   flow,
-}: Pick<TreeProps, "node" | "colors" | "flow">) {
+  waitingLabel,
+}: Pick<TreeProps, "node" | "colors" | "flow" | "waitingLabel">) {
+  if (node.waiting)
+    return (
+      <Text
+        style={{ color: colors.foregroundMuted, fontSize: 9, fontWeight: "700" }}
+      >
+        {waitingLabel}
+      </Text>
+    );
   if (!node.badge) return null;
   if (node.badge === "running")
     return (
@@ -131,7 +142,7 @@ function Badge({
   );
 }
 
-function Card(props: TreeProps & { root?: boolean }) {
+function Card(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
   const {
     node,
     colors,
@@ -142,9 +153,37 @@ function Card(props: TreeProps & { root?: boolean }) {
     glow,
     icons,
     root,
+    collapseRoot,
     phase,
+    waitingLabel,
   } = props;
-  const content = (
+  const collapsed = Boolean(root && collapseRoot);
+  const content = collapsed ? (
+    <>
+      <Logo node={node} icons={icons} colors={colors} size={26} />
+      {node.model ? (
+        <Text
+          numberOfLines={2}
+          style={{
+            color: colors.foregroundMuted,
+            fontSize: 9,
+            textAlign: "center",
+            maxWidth: "100%",
+          }}
+        >
+          {node.model}
+        </Text>
+      ) : null}
+      <View style={{ position: "absolute", right: 6, top: 6 }}>
+        <Badge
+          node={node}
+          colors={colors}
+          flow={flow}
+          waitingLabel={waitingLabel}
+        />
+      </View>
+    </>
+  ) : (
     <>
       <Logo node={node} icons={icons} colors={colors} size={26} />
       <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
@@ -197,7 +236,7 @@ function Card(props: TreeProps & { root?: boolean }) {
                     fontSize: 9,
                   }}
                 >
-                  {chip}
+                {chip}
                 </Text>
               </View>
             ) : null,
@@ -205,16 +244,31 @@ function Card(props: TreeProps & { root?: boolean }) {
         </View>
       </View>
       <View style={{ position: "absolute", right: 9, top: 9 }}>
-        <Badge node={node} colors={colors} flow={flow} />
+        <Badge
+          node={node}
+          colors={colors}
+          flow={flow}
+          waitingLabel={waitingLabel}
+        />
       </View>
     </>
   );
   const style = {
-    width: compact ? (root ? 205 : 185) : root ? 240 : 220,
+    width: collapsed
+      ? COLLAPSED_ROOT_WIDTH
+      : compact
+        ? root
+          ? ROOT_WIDTH.compact
+          : CHILD_WIDTH.compact
+        : root
+          ? ROOT_WIDTH.regular
+          : CHILD_WIDTH.regular,
     minHeight: 76,
-    padding: 10,
-    flexDirection: "row" as const,
-    gap: 9,
+    padding: collapsed ? 8 : 10,
+    flexDirection: collapsed ? ("column" as const) : ("row" as const),
+    alignItems: collapsed ? ("center" as const) : undefined,
+    justifyContent: collapsed ? ("center" as const) : undefined,
+    gap: collapsed ? 6 : 9,
     borderWidth: 1,
     borderColor: node.live
       ? RED
@@ -229,17 +283,22 @@ function Card(props: TreeProps & { root?: boolean }) {
     shadowOpacity: node.live ? 0.125 : 0,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 0 },
+    // A role with no session yet: dimmed, and nothing to open.
+    opacity: node.waiting ? 0.45 : 1,
   };
-  const card = open ? (
+  const card = open && !node.waiting ? (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={node.title}
       onPress={() => open(node.agent.id)}
       style={style}
     >
       {content}
     </Pressable>
   ) : (
-    <View style={style}>{content}</View>
+    <View accessibilityLabel={node.title} style={style}>
+      {content}
+    </View>
   );
   if (!node.live) return card;
   const ping =
@@ -361,9 +420,24 @@ function Dashes({
   );
 }
 
+const ROOT_WIDTH = { compact: 205, regular: 240 };
+const CHILD_WIDTH = { compact: 185, regular: 220 };
+const COLLAPSED_ROOT_WIDTH = 84;
+const TREE_PAD_X = 16;
 const STEM = 20;
 const BRANCH = 24;
 const ARRIVAL = 0.84;
+
+function treeDepth(node: AgentNode): number {
+  if (!node.children.length) return 0;
+  return 1 + Math.max(...node.children.map(treeDepth));
+}
+
+function expandedTreeWidth(node: AgentNode, compact: boolean): number {
+  const rootWidth = compact ? ROOT_WIDTH.compact : ROOT_WIDTH.regular;
+  const childWidth = compact ? CHILD_WIDTH.compact : CHILD_WIDTH.regular;
+  return rootWidth + treeDepth(node) * (STEM + BRANCH + childWidth);
+}
 
 function CommandPacket({
   phase,
@@ -498,6 +572,7 @@ function Connector({
                   top: center,
                   borderTopWidth: 1,
                   borderColor: colors.border,
+                  borderStyle: child.waiting ? "dashed" : "solid",
                 }}
               />
             ) : (
@@ -510,6 +585,7 @@ function Connector({
                   height: radius,
                   borderLeftWidth: 1,
                   borderColor: colors.border,
+                  borderStyle: child.waiting ? "dashed" : "solid",
                   ...(above
                     ? { borderTopWidth: 1, borderTopLeftRadius: radius }
                     : { borderBottomWidth: 1, borderBottomLeftRadius: radius }),
@@ -575,7 +651,7 @@ function Connector({
   );
 }
 
-function Tree(props: TreeProps & { root?: boolean }) {
+function Tree(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
   const { node, colors, flow, packet } = props;
   const [height, setHeight] = useState(0);
   const [heights, setHeights] = useState<Record<string, number>>({});
@@ -652,6 +728,7 @@ function Tree(props: TreeProps & { root?: boolean }) {
               <Tree
                 {...props}
                 root={false}
+                collapseRoot={false}
                 node={child}
                 phase={phases[child.agent.id]}
               />
@@ -737,8 +814,11 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
     return () => animation.stop();
   }, [flow]);
   useEffect(() => {
-    const refreshAgents = () =>
+    // Applying a team starts or messages an orchestrator, so the roster is re-read with the agents.
+    const refreshAgents = () => {
       void client.invalidateQueries({ queryKey: ["dashboard", "agents"] });
+      void client.invalidateQueries({ queryKey: ["dashboard", "roster"] });
+    };
     const refreshWorkspaces = () =>
       void client.invalidateQueries({ queryKey: ["dashboard", "workspaces"] });
     const refreshProviders = () =>
@@ -788,6 +868,11 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
     queryKey: ["dashboard", "workspaces"],
     queryFn: () => paseo.workspaces.list(),
   });
+  const readRoster = useRpc(teamRosterRpc);
+  const roster = useQuery({
+    queryKey: ["dashboard", "roster", props.workspaceId],
+    queryFn: () => readRoster({ workspaceId: props.workspaceId }),
+  });
   const providers = useQuery({
     queryKey: ["dashboard", "providers"],
     queryFn: () => paseo.providers.snapshot(),
@@ -815,9 +900,9 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
     return buildAgentForest(
       agents.data?.entries.map((entry) => entry.agent) ?? [],
       ids,
-      { ...state, defaultEfforts },
+      { ...state, defaultEfforts, roster: roster.data?.teams },
     );
-  }, [agents.data, workspaces.data, props.workspaceId, state, defaultEfforts]);
+  }, [agents.data, workspaces.data, props.workspaceId, state, defaultEfforts, roster.data]);
   const icons = useMemo(
     () =>
       new Map(
@@ -826,6 +911,19 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
     [providers.data],
   );
   const colors = props.theme.colors;
+  const pad = props.layout.compact ? 16 : 24;
+  const [panelWidth, setPanelWidth] = useState(0);
+  const widestTree = useMemo(
+    () =>
+      forest.trees.reduce(
+        (max, node) =>
+          Math.max(max, expandedTreeWidth(node, props.layout.compact)),
+        0,
+      ),
+    [forest.trees, props.layout.compact],
+  );
+  const collapseRoot =
+    panelWidth > 0 && widestTree > panelWidth - (pad + TREE_PAD_X) * 2;
   const treeProps = {
     colors,
     compact: props.layout.compact,
@@ -843,6 +941,7 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
         : node.kind === "planner"
           ? t("planner")
           : node.agent.provider),
+    waitingLabel: t("waiting"),
   };
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface0 }}>
@@ -902,60 +1001,81 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
         </Pressable>
       </View>
       <ScrollView
-        contentContainerStyle={{
-          padding: props.layout.compact ? 16 : 24,
-          gap: 24,
-        }}
+        horizontal
+        style={{ flex: 1 }}
+        contentContainerStyle={{ flexGrow: 1 }}
+        onLayout={(event) => setPanelWidth(event.nativeEvent.layout.width)}
       >
-        {agents.isLoading || workspaces.isLoading ? (
-          <Loading />
-        ) : agents.error || workspaces.error ? (
-          <Text style={{ color: colors.statusDanger }}>
-            {t("dashboardError")}
-          </Text>
-        ) : !forest.trees.length && !forest.solo.length ? (
-          <Text style={{ color: colors.foregroundMuted }}>
-            {t("emptyDashboard")}
-          </Text>
-        ) : (
-          <>
-            <ScrollView
-              horizontal
-              contentContainerStyle={{
-                paddingHorizontal: 16,
-                paddingVertical: 12,
-              }}
-            >
-              <View style={{ gap: 26, alignItems: "flex-start" }}>
+        <ScrollView
+          style={{ flexGrow: 1, flexShrink: 0 }}
+          contentContainerStyle={{
+            padding: pad,
+            gap: 24,
+          }}
+        >
+          {agents.isLoading || workspaces.isLoading ? (
+            <Loading />
+          ) : agents.error || workspaces.error ? (
+            <Text style={{ color: colors.statusDanger }}>
+              {t("dashboardError")}
+            </Text>
+          ) : !forest.trees.length && !forest.solo.length ? (
+            <Text style={{ color: colors.foregroundMuted }}>
+              {t("emptyDashboard")}
+            </Text>
+          ) : (
+            <>
+              <View
+                style={{
+                  paddingHorizontal: TREE_PAD_X,
+                  paddingVertical: 12,
+                  gap: 26,
+                  alignItems: "flex-start",
+                }}
+              >
                 {forest.trees.map((node) => (
-                  <Tree key={node.agent.id} {...treeProps} node={node} root />
+                  <Tree
+                    key={node.agent.id}
+                    {...treeProps}
+                    node={node}
+                    root
+                    collapseRoot={collapseRoot}
+                  />
                 ))}
               </View>
-            </ScrollView>
-            {forest.solo.length > 0 && (
-              <View style={{ gap: 12 }}>
-                <Text
+              {forest.solo.length > 0 && (
+                <View
                   style={{
-                    color: colors.foregroundMuted,
-                    fontSize: 11,
-                    fontWeight: "700",
-                    textTransform: "uppercase",
-                    letterSpacing: 1,
+                    gap: 12,
+                    width:
+                      panelWidth > 0
+                        ? Math.max(0, panelWidth - pad * 2)
+                        : undefined,
                   }}
                 >
-                  {t("soloAgents")}
-                </Text>
-                <View
-                  style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}
-                >
-                  {forest.solo.map((node) => (
-                    <Card key={node.agent.id} {...treeProps} node={node} />
-                  ))}
+                  <Text
+                    style={{
+                      color: colors.foregroundMuted,
+                      fontSize: 11,
+                      fontWeight: "700",
+                      textTransform: "uppercase",
+                      letterSpacing: 1,
+                    }}
+                  >
+                    {t("soloAgents")}
+                  </Text>
+                  <View
+                    style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}
+                  >
+                    {forest.solo.map((node) => (
+                      <Card key={node.agent.id} {...treeProps} node={node} />
+                    ))}
+                  </View>
                 </View>
-              </View>
-            )}
-          </>
-        )}
+              )}
+            </>
+          )}
+        </ScrollView>
       </ScrollView>
     </View>
   );

@@ -48,3 +48,24 @@ export async function ensureWorkspaces(steps: readonly WorkspaceStep[], create: 
   for (let at = steps.length - 1; at >= 0; at -= 1) ids[at] = steps[at]!.existingId ?? (await create(steps[at]!.workspace));
   return steps.map((step, at) => ({ target: step.target, workspace: step.workspace, id: ids[at]!, created: step.existingId === null }));
 }
+
+/** `base` when no workspace in `taken` has that title, else the first free `base-2`, `base-3`, … */
+export function freeWorkspace(base: string, taken: readonly string[]): string {
+  const used = new Set(taken.map(key));
+  if (!used.has(key(base))) return base;
+  let index = 2;
+  while (used.has(key(`${base}-${index}`))) index += 1;
+  return `${base}-${index}`;
+}
+
+/**
+ * A new draft whose orchestrator (unless fixed) and own role workspaces don't reuse any of the project's
+ * workspace titles or each other, so applying it creates new workspaces. Shared roles stay shared.
+ */
+export function withFreeWorkspaces(team: Team, titles: readonly string[], { orchestrator }: { orchestrator: boolean }): Team {
+  const taken = [...titles];
+  const take = (title: string) => (taken.push(title), title);
+  const workspace = orchestrator ? take(freeWorkspace(team.orchestrator.workspace, taken)) : take(team.orchestrator.workspace);
+  const roles = team.roles.map((role) => (isSharedRole(role) ? role : { ...role, workspace: take(freeWorkspace(role.workspace, taken)) }));
+  return { ...team, orchestrator: { ...team.orchestrator, workspace }, roles };
+}

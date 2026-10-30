@@ -421,3 +421,111 @@ describe("providerIcon", () => {
     expect(providerIcon("")).toEqual({ kind: "letter", letter: "?" });
   });
 });
+
+describe("buildAgentForest with a roster", () => {
+  const LABEL = "workspace-agents";
+  const orchestrator = (id: string, over: Partial<DashboardAgent> = {}) => agent(id, { ...over, labels: { [LABEL]: "orchestrator", ...over.labels } });
+  const roster = [{
+    orchestratorWorkspaceId: "wks_a",
+    roles: [
+      { name: "builder", provider: "codex", model: "gpt-6.1-sol", workspaceId: "wks_a" },
+      { name: "tester", provider: "antigravity", model: "gemini-4-argon-medium", workspaceId: "wks_b" },
+    ],
+  }];
+  const waiting = (node: AgentNode) => node.children.filter((kid) => kid.waiting).map((kid) => kid.role);
+
+  it("adds a waiting node for every role without a session, after the real children", () => {
+    const forest = buildAgentForest([orchestrator("o"), child("x", "o", { labels: { role: "other" } })], ["wks_a", "wks_b"], { ...hide, roster });
+    expect(forest.trees[0]!.children.map((kid) => kid.waiting ? `waiting:${kid.role}` : kid.agent.id)).toEqual(["x", "waiting:builder", "waiting:tester"]);
+    const tester = forest.trees[0]!.children[2]!;
+    expect(tester).toMatchObject({ kind: "role", title: "tester", model: "gemini-4-argon-medium", live: false, badge: null });
+    expect(tester.agent.provider).toBe("antigravity");
+  });
+
+  it("lifts an orchestrator whose only children are waiting roles into the trees", () => {
+    const forest = buildAgentForest([orchestrator("o")], ["wks_a", "wks_b"], { ...hide, roster });
+    expect(ids(forest.trees)).toEqual(["o"]);
+    expect(forest.solo).toEqual([]);
+  });
+
+  it("hides a role's waiting node when a shown agent in the role's workspace has its label, whoever started it", () => {
+    const forest = buildAgentForest([orchestrator("o"), agent("t", { workspaceId: "wks_b", labels: { role: "tester" } })], ["wks_a", "wks_b"], { ...hide, roster });
+    expect(waiting(forest.trees[0]!)).toEqual(["builder"]);
+  });
+
+  it("ignores a role session in another workspace", () => {
+    const forest = buildAgentForest([orchestrator("o"), agent("t", { workspaceId: "wks_a", labels: { role: "tester" } })], ["wks_a", "wks_b"], { ...hide, roster });
+    expect(waiting(forest.trees[0]!)).toEqual(["builder", "tester"]);
+  });
+
+  it("shows the waiting node again when the role's only session is archived and hidden", () => {
+    const agents = [orchestrator("o"), child("b", "o", { labels: { role: "builder" }, archivedAt: "2026-10-30T01:00:00Z" })];
+    expect(waiting(buildAgentForest(agents, ["wks_a", "wks_b"], { ...hide, roster }).trees[0]!)).toEqual(["builder", "tester"]);
+    expect(waiting(buildAgentForest(agents, ["wks_a", "wks_b"], { ...show, roster }).trees[0]!)).toEqual(["tester"]);
+  });
+
+  it("puts the waiting nodes under the newest shown orchestrator only", () => {
+    const forest = buildAgentForest([orchestrator("old", { createdAt: at(1) }), orchestrator("new", { createdAt: at(2) })], ["wks_a", "wks_b"], { ...hide, roster });
+    expect(ids(forest.trees)).toEqual(["new"]);
+    expect(ids(forest.solo)).toEqual(["old"]);
+  });
+
+  it("adds nothing when the team's workspace has no shown orchestrator", () => {
+    const forest = buildAgentForest([agent("plain"), orchestrator("gone", { status: "closed" })], ["wks_a", "wks_b"], { ...hide, roster });
+    expect(forest.trees).toEqual([]);
+    expect(ids(forest.solo)).toEqual(["plain"]);
+  });
+
+  it("treats a role whose own workspace doesn't exist yet as waiting", () => {
+    const forest = buildAgentForest([orchestrator("o")], ["wks_a"], { ...hide, roster: [{ orchestratorWorkspaceId: "wks_a", roles: [{ name: "docs", provider: "claude", model: "claude-sonnet-5-5", workspaceId: null }] }] });
+    expect(waiting(forest.trees[0]!)).toEqual(["docs"]);
+  });
+
+  describe("role sessions whose parent is not shown", () => {
+    const role = (id: string, over: Partial<DashboardAgent> = {}) => agent(id, { ...over, labels: { role: "builder", ...over.labels } });
+    const scope = ["wks_a", "wks_b"];
+
+    it("moves under the newest shown orchestrator when the parent is archived and hidden", () => {
+      const agents = [orchestrator("old", { createdAt: at(1), archivedAt: "2026-10-30T01:00:00Z" }), orchestrator("new", { createdAt: at(2) }), role("b", { labels: { [PARENT]: "old" }, createdAt: at(1) })];
+      const forest = buildAgentForest(agents, scope, { ...hide, roster });
+      expect(ids(forest.trees)).toEqual(["new"]);
+      expect(ids(forest.trees[0]!.children.filter((kid) => !kid.waiting))).toEqual(["b"]);
+      expect(forest.solo).toEqual([]);
+    });
+
+    it("keeps a session whose parent is shown where it is", () => {
+      const agents = [orchestrator("old", { createdAt: at(1) }), orchestrator("new", { createdAt: at(2) }), role("b", { labels: { [PARENT]: "old" } })];
+      const forest = buildAgentForest(agents, scope, { ...hide, roster });
+      expect(ids(forest.trees.find((tree) => tree.agent.id === "old")!.children)).toEqual(["b"]);
+      expect(ids(forest.trees.find((tree) => tree.agent.id === "new")?.children.filter((kid) => !kid.waiting) ?? [])).toEqual([]);
+    });
+
+    it("moves a role session in another role workspace of the team", () => {
+      const agents = [orchestrator("o"), role("t", { workspaceId: "wks_b", labels: { role: "tester", [PARENT]: "gone" } })];
+      const forest = buildAgentForest(agents, scope, { ...hide, roster });
+      expect(ids(forest.trees[0]!.children.filter((kid) => !kid.waiting))).toEqual(["t"]);
+    });
+
+    it("keeps a session that has no parent at all", () => {
+      const forest = buildAgentForest([orchestrator("o"), role("b")], scope, { ...hide, roster });
+      expect(ids(forest.solo)).toEqual(["b"]);
+    });
+
+    it("does not move a session outside the team's workspaces", () => {
+      const agents = [orchestrator("o"), role("x", { workspaceId: "wks_c", labels: { [PARENT]: "gone" } })];
+      const forest = buildAgentForest(agents, ["wks_a", "wks_b", "wks_c"], { ...hide, roster });
+      expect(ids(forest.solo)).toEqual(["x"]);
+    });
+
+    it("does not move a session without a role label", () => {
+      const forest = buildAgentForest([orchestrator("o"), agent("p", { labels: { [PARENT]: "gone" } })], scope, { ...hide, roster });
+      expect(ids(forest.solo)).toEqual(["p"]);
+    });
+
+    it("stays a root without an orchestrator, and without a roster", () => {
+      const agents = [role("b", { labels: { [PARENT]: "gone" } })];
+      expect(ids(buildAgentForest(agents, scope, { ...hide, roster }).solo)).toEqual(["b"]);
+      expect(ids(buildAgentForest([orchestrator("o"), ...agents], scope, hide).solo).sort()).toEqual(["b", "o"]);
+    });
+  });
+});

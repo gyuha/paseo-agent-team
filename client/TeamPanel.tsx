@@ -1,12 +1,14 @@
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc, useTranslation } from "@getpaseo/plugin/client";
+import { Modal } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { freeWorkspace, withFreeWorkspaces } from "../shared/apply-plan";
 import { foldersText, newRole, parseFolders } from "../shared/draft";
 import { messages } from "./i18n";
-import { teamApplyRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRoleProposalRpc, teamRoleProposeRpc } from "../shared/rpc";
+import { teamApplyRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamRoleProposalRpc, teamRoleProposeRpc } from "../shared/rpc";
 import { checkTeam, isSharedRole, type Role, type Team } from "../shared/team";
 import { TEAMS_DIR, workspaceClashes } from "../shared/team-files";
 import { validateTeam, type ProviderInfo } from "../shared/validate";
@@ -116,6 +118,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const propose = useRpc(teamProposeRpc);
   const proposal = useRpc(teamProposalRpc);
   const apply = useRpc(teamApplyRpc);
+  const restartOrchestrator = useRpc(teamRestartOrchestratorRpc);
   const proposeRole = useRpc(teamRoleProposeRpc);
   const roleProposal = useRpc(teamRoleProposalRpc);
 
@@ -123,6 +126,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const [goal, setGoal] = useState("");
   const [plannerId, setPlannerId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Team | null>(null);
+  const [confirmRestart, setConfirmRestart] = useState(false);
 
   const planning = useQuery({
     queryKey: ["workspace-agents", "proposal", plannerId],
@@ -133,8 +137,11 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   // From a workspace, the team's orchestrator always runs in that workspace.
   const here = current.data?.workspace ?? null;
   const atHere = (team: Team): Team => (here === null ? team : { ...team, orchestrator: { ...team.orchestrator, workspace: here } });
+  // A new draft creates new workspaces instead of landing in the project's existing ones.
+  const titles = current.data?.projectWorkspaces ?? [];
+  const fresh = (team: Team): Team => withFreeWorkspaces(atHere(team), titles, { orchestrator: here === null });
   useEffect(() => {
-    if (planning.data?.status === "done") setDraft(atHere(planning.data.team));
+    if (planning.data?.status === "done") setDraft(fresh(planning.data.team));
   }, [planning.data]);
 
   // One AI role request at a time; its result is appended to the draft and dropped if the draft was cancelled.
@@ -149,7 +156,9 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   useEffect(() => {
     if (rolePlanning.data?.status !== "done") return;
     const role = rolePlanning.data.role;
-    setDraft((current) => (current ? { ...current, roles: [...current.roles, role] } : current));
+    const freeRole = (team: Team): Role =>
+      isSharedRole(role) ? role : { ...role, workspace: freeWorkspace(role.workspace, [...titles, team.orchestrator.workspace, ...team.roles.map((other) => other.workspace)]) };
+    setDraft((current) => (current ? { ...current, roles: [...current.roles, freeRole(current)] } : current));
     setRoleDescription("");
     setRolePlannerId(null);
   }, [rolePlanning.data]);
@@ -167,6 +176,15 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
       void current.refetch();
       void queryClient.invalidateQueries({ queryKey: PROJECT_TEAMS_KEY });
       if (result.ok) onApplied?.(result);
+    },
+  });
+  const restarted = useMutation({
+    mutationFn: () => restartOrchestrator(target),
+    onSuccess: () => {
+      void current.refetch();
+      void queryClient.invalidateQueries({ queryKey: PROJECT_TEAMS_KEY });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard", "agents"] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard", "roster"] });
     },
   });
 
@@ -194,10 +212,30 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
           {data.validation.map((error) => <Text key={error.target + error.message} style={s.danger}>{error.target}: {error.message}</Text>)}
           <View style={s.row}>
             <Button s={s} label={t("current.edit")} onPress={() => setDraft(data.team)} />
-            <Button s={s} secondary label={t("current.reapply")} disabled={applied.isPending} onPress={() => applied.mutate(data.team!)} />
+            <Button s={s} secondary label={t("current.reapply")} disabled={applied.isPending || restarted.isPending} onPress={() => applied.mutate(data.team!)} />
+            <Button s={s} secondary label={t("current.restart")} disabled={applied.isPending || restarted.isPending} onPress={() => setConfirmRestart(true)} />
           </View>
+          <Text style={s.muted}>{t("current.restartHint")}</Text>
         </View>
       ) : null}
+
+      <Modal title={t("current.restartConfirmTitle")} open={confirmRestart} onOpenChange={setConfirmRestart}>
+        <Modal.Content>
+          <Text style={s.text}>{t("current.restartConfirmBody")}</Text>
+          <View style={s.row}>
+            <Button s={s} secondary label={t("review.cancel")} disabled={restarted.isPending} onPress={() => setConfirmRestart(false)} />
+            <Button
+              s={s}
+              label={t("current.restartConfirm")}
+              disabled={restarted.isPending}
+              onPress={() => {
+                setConfirmRestart(false);
+                restarted.mutate();
+              }}
+            />
+          </View>
+        </Modal.Content>
+      </Modal>
 
       {data.owner ? <Text style={s.muted}>{t("current.roleOf", data.owner)}</Text> : null}
       {data.owner ? null : !draft ? (
@@ -206,7 +244,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
           <TextInput style={s.input} value={goal} placeholder={t("create.goalPlaceholder")} onChangeText={setGoal} />
           <View style={s.row}>
             <Button s={s} label={t("create.propose")} disabled={!goal.trim() || start.isPending || planning.data?.status === "running"} onPress={() => start.mutate()} />
-            <Button s={s} secondary label={t("create.blank")} onPress={() => setDraft({ version: 1, goal, orchestrator: { workspace: here ?? "orchestrator", provider: "claude", model: catalog.find((entry) => entry.id === "claude")?.models[0]?.id ?? "" }, roles: [newRole(catalog, [])] })} />
+            <Button s={s} secondary label={t("create.blank")} onPress={() => setDraft(fresh({ version: 1, goal, orchestrator: { workspace: "orchestrator", provider: "claude", model: catalog.find((entry) => entry.id === "claude")?.models[0]?.id ?? "" }, roles: [newRole(catalog, [])] }))} />
           </View>
           {plannerId && (!planning.data || planning.data.status === "running") ? <Text style={s.muted}>{t("create.planning")}</Text> : null}
           {planning.data?.status === "failed" ? planning.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
@@ -248,6 +286,9 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
       {applied.isPending ? <Text style={s.muted}>{t("result.applying")}</Text> : null}
       {applied.error ? <Text style={s.danger}>{String(applied.error)}</Text> : null}
       {applied.data && !applied.data.ok ? applied.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
+      {restarted.isPending ? <Text style={s.muted}>{t("current.restarting")}</Text> : null}
+      {restarted.error ? <Text style={s.danger}>{String(restarted.error)}</Text> : null}
+      {restarted.data && !restarted.data.ok ? restarted.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
       {applied.data?.ok ? (
         <View style={s.card}>
           <Text style={s.success}>{t("result.applied", { file: applied.data.file })}</Text>
