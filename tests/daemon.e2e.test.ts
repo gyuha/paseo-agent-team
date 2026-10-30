@@ -27,9 +27,25 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     projectId = (await paseo.workspaces.ref(workspaceId).refresh())!.projectId;
   }, 60_000);
 
+  // Archives every agent the tests left in the temp project (planners, orchestrators and the role agents they started).
   afterAll(async () => {
-    await paseo?.close();
-  });
+    if (!paseo) return;
+    try {
+      if (projectId) {
+        const workspaceIds = new Set((await paseo.workspaces.list()).entries.filter((entry) => entry.projectId === projectId).map((entry) => entry.id));
+        const { entries } = await paseo.agents.list({ filter: { includeArchived: true } });
+        for (const { agent } of entries) {
+          if (!workspaceIds.has(agent.workspaceId ?? "") || agent.archivedAt) continue;
+          // The client's archive() has no force option, so a running agent that refuses is logged and left.
+          await paseo.agents.ref(agent.id).archive().catch((error: unknown) => console.warn(`e2e cleanup: could not archive agent ${agent.id}: ${String(error)}`));
+        }
+      }
+    } catch (error) {
+      console.warn(`e2e cleanup failed: ${String(error)}`);
+    } finally {
+      await paseo.close();
+    }
+  }, 60_000);
 
   it("reads a project without a team file", async () => {
     const result = await readTeam({ workspaceId }, { paseo });
