@@ -33,7 +33,7 @@
     },
     {
       "name": "tests",
-      "workspace": "tests",
+      "workspace": "",
       "provider": "claude",
       "model": "claude-sonnet-5-5",
       "folders": [
