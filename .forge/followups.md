@@ -35,3 +35,7 @@
 <!-- followup: fu-14efcc321792 | source: agent-dashboard-explorer | task: 13 | date: 2026-10-30 | status: open | taken: - -->
 - 아주 좁은 폭(오른쪽 사이드바)에서는 오케스트레이터 카드를 줄여도 역할 카드가 넘친다. 역할 카드 축소나 세로 쌓기를 검토할 것.
   Evidence: app.paseo.sh 사이드바에서 축소 카드 옆 역할 카드가 오른쪽으로 잘려 하단 스크롤이 필요했다.
+
+<!-- followup: fu-64d8c26f699a | source: keep-team-proposal-across-navigation | task: 14 | date: 2026-10-30 | status: open | taken: - -->
+- e2e "applies the team: file, workspaces and orchestrator"가 `tests/daemon.e2e.test.ts:163`에서 실패한다. `projectTeamsList`는 팀 파일 경로를 상대 경로로, Apply는 절대 경로로 돌려준다. 어느 쪽이 맞는지 정해 한쪽을 맞출 것.
+  Evidence: 2026-10-30 e2e 실행에서 기대값은 `/var/folders/.../pwa-game-KWDUAb/.agents/teams/orchestrator.json`, 실제값은 `.agents/teams/orchestrator.json`이었다.

@@ -3,12 +3,12 @@ import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { ensureWorkspaces, planWorkspaces, workspaceLabel } from "../shared/apply-plan";
-import { findOrchestrator, orchestratorsToArchive, LABEL, PLANNER_WORKSPACE, plannerCleanup } from "../shared/cleanup";
+import { findOrchestrator, orchestratorsToArchive, LABEL, pendingPlanners, PLANNER_WORKSPACE, plannerCleanup, PROPOSAL_FOR, proposalTarget } from "../shared/cleanup";
 import { CLAUDE_LOCAL_SETTINGS, needsRunPermission, PASEO_RUN_RULE, withAllowRule } from "../shared/permissions";
 import { orchestratorPrompt, teamChangedMessage } from "../shared/prompt";
 import { extractProposal, extractRole, plannerPrompt, ROLE_JSON_SCHEMA, rolePrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
 import { plannerWorkspace, teamWorkspaceId, type ProjectRef } from "../shared/projects";
-import type { teamApplyRpc, teamProjectsRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamRoleProposalRpc, teamRoleProposeRpc, teamRosterRpc } from "../shared/rpc";
+import type { teamApplyRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamRoleProposalRpc, teamRoleProposeRpc, teamRosterRpc } from "../shared/rpc";
 import { checkTeam, isSharedRole, parseTeam, serializeTeam, TEAM_FILE, type Team } from "../shared/team";
 import { roleOwnerOf, teamFileFor, teamIn, TEAMS_DIR, workspaceClashes, workspacesOfOtherTeams, type TeamFile } from "../shared/team-files";
 import { catalogFrom, roleModes, agentModeOf, validateTeam, type ProviderEntry } from "../shared/validate";
@@ -139,7 +139,19 @@ export async function readTeam(target: RpcInput<typeof teamReadRpc>, { paseo }: 
   };
 }
 
+/** The target's unarchived team planners, newest first. */
+async function plannersFor(paseo: PaseoApi, target: Target): Promise<string[]> {
+  return pendingPlanners((await paseo.agents.list()).entries.map((entry) => entry.agent), proposalTarget(target));
+}
+
+/** A new proposal replaces the target's earlier ones, so only one can ever come back to the screen. */
+async function archivePlannersFor(paseo: PaseoApi, target: Target): Promise<void> {
+  for (const id of await plannersFor(paseo, target)) await paseo.agents.ref(id).archive();
+}
+
 export async function proposeTeam({ goal, ...target }: RpcInput<typeof teamProposeRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamProposeRpc>> {
+  // A leftover earlier planner can't shadow this one (the newest is restored), so failing to archive it doesn't block proposing.
+  await archivePlannersFor(paseo, target).catch(() => undefined);
   const entries = await providerEntries(paseo);
   const provider = plannerProvider(entries);
   const agent = await paseo.workspaces.ref(await plannerWorkspaceOf(paseo, target)).agents.create({
@@ -147,9 +159,18 @@ export async function proposeTeam({ goal, ...target }: RpcInput<typeof teamPropo
     title: "Team planner",
     prompt: plannerPrompt(goal, catalogFrom(entries)),
     outputSchema: TEAM_JSON_SCHEMA,
-    labels: { [LABEL]: "planner" },
+    labels: { [LABEL]: "planner", [PROPOSAL_FOR]: proposalTarget(target) },
   });
   return { agentId: agent.id };
+}
+
+export async function pendingProposal(target: RpcInput<typeof teamPendingProposalRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamPendingProposalRpc>> {
+  return { agentId: (await plannersFor(paseo, target))[0] ?? null };
+}
+
+export async function cancelProposal(target: RpcInput<typeof teamProposalCancelRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamProposalCancelRpc>> {
+  await archivePlannersFor(paseo, target);
+  return {};
 }
 
 /** Waits up to a second for a planner; its final message once it has finished. */

@@ -4,6 +4,22 @@ import type { Team } from "./team";
 /** Label key on the agents this plugin starts; the value is the agent's job. */
 export const LABEL = "workspace-agents";
 
+/** Label key on a team planner naming the workspace or project its proposal is for, so a reopened screen can find it again. */
+export const PROPOSAL_FOR = "workspace-agents-proposal-for";
+
+/** The id a team proposal is filed under: the workspace's, or the project's when no workspace is open. */
+export function proposalTarget(target: { workspaceId: string } | { projectId: string }): string {
+  return "workspaceId" in target ? target.workspaceId : target.projectId;
+}
+
+/** The unarchived team planners proposing for the target, newest first. */
+export function pendingPlanners(agents: readonly (AgentRef & { createdAt: string })[], targetId: string): string[] {
+  return agents
+    .filter((agent) => agent.labels[LABEL] === "planner" && agent.labels[PROPOSAL_FOR] === targetId && !agent.archivedAt)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map((agent) => agent.id);
+}
+
 /** Title of the workspace the planner gets when its project has none. */
 export const PLANNER_WORKSPACE = "Team planner";
 

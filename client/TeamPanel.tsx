@@ -8,7 +8,7 @@ import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { freeWorkspace, withFreeWorkspaces } from "../shared/apply-plan";
 import { foldersText, newRole, parseFolders } from "../shared/draft";
 import { messages } from "./i18n";
-import { teamApplyRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamRoleProposalRpc, teamRoleProposeRpc } from "../shared/rpc";
+import { teamApplyRpc, teamPendingProposalRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamRoleProposalRpc, teamRoleProposeRpc } from "../shared/rpc";
 import { checkTeam, isSharedRole, type Role, type Team } from "../shared/team";
 import { TEAMS_DIR, workspaceClashes } from "../shared/team-files";
 import { validateTeam, type ProviderInfo } from "../shared/validate";
@@ -121,12 +121,24 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const restartOrchestrator = useRpc(teamRestartOrchestratorRpc);
   const proposeRole = useRpc(teamRoleProposeRpc);
   const roleProposal = useRpc(teamRoleProposalRpc);
+  const pendingProposal = useRpc(teamPendingProposalRpc);
+  const cancelProposal = useRpc(teamProposalCancelRpc);
 
   const current = useQuery({ queryKey: ["workspace-agents", "team", target], queryFn: () => read(target) });
   const [goal, setGoal] = useState("");
   const [plannerId, setPlannerId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Team | null>(null);
   const [confirmRestart, setConfirmRestart] = useState(false);
+
+  // The planner keeps running when this screen closes; reopening it picks the newest proposal back up.
+  // Fetched fresh on every open (gcTime 0) and only once the team is read, since a proposal is fitted to it.
+  const pendingKey = ["workspace-agents", "pending-proposal", target];
+  const pending = useQuery({ queryKey: pendingKey, queryFn: () => pendingProposal(target), enabled: current.data !== undefined, gcTime: 0 });
+  useEffect(() => {
+    const agentId = pending.data?.agentId;
+    if (agentId) setPlannerId((id) => id ?? agentId);
+  }, [pending.data]);
+  const cancelled = useMutation({ mutationFn: () => cancelProposal(target), onSuccess: () => queryClient.setQueryData(pendingKey, { agentId: null }) });
 
   const planning = useQuery({
     queryKey: ["workspace-agents", "proposal", plannerId],
@@ -278,11 +290,12 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
           {problems.map((problem) => <Text key={problem} style={s.danger}>{problem}</Text>)}
           <View style={s.row}>
             <Button s={s} label={t("review.apply")} disabled={problems.length > 0 || applied.isPending} onPress={() => applied.mutate(draft)} />
-            <Button s={s} secondary label={t("review.cancel")} onPress={() => { setDraft(null); setPlannerId(null); setRolePlannerId(null); }} />
+            <Button s={s} secondary label={t("review.cancel")} onPress={() => { if (plannerId) cancelled.mutate(); setDraft(null); setPlannerId(null); setRolePlannerId(null); }} />
           </View>
         </View>
       )}
 
+      {cancelled.error ? <Text style={s.danger}>{String(cancelled.error)}</Text> : null}
       {applied.isPending ? <Text style={s.muted}>{t("result.applying")}</Text> : null}
       {applied.error ? <Text style={s.danger}>{String(applied.error)}</Text> : null}
       {applied.data && !applied.data.ok ? applied.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}

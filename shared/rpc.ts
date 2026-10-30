@@ -91,6 +91,20 @@ export const teamProposalRpc = defineRpc({
   ]),
 });
 
+/** The newest team planner still proposing for the target, so a reopened screen picks its proposal back up. */
+export const teamPendingProposalRpc = defineRpc({
+  name: "team.proposal.pending",
+  input: TargetSchema,
+  output: z.object({ agentId: z.string().nullable() }),
+});
+
+/** Archives the target's team planners, so a cancelled proposal does not come back. */
+export const teamProposalCancelRpc = defineRpc({
+  name: "team.proposal.cancel",
+  input: TargetSchema,
+  output: z.object({}),
+});
+
 const TeamOutlineSchema = z.object({
   orchestratorWorkspace: z.string(),
   roles: z.array(z.object({ name: z.string(), workspace: z.string(), folders: z.array(z.string()) })),

@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { applyTeam, proposeRole, projectTeamsList, proposeTeam, readTeam, roleProposal, teamProposal } from "../server/team";
+import { applyTeam, cancelProposal, pendingProposal, projectTeamsList, proposeRole, proposeTeam, readTeam, roleProposal, teamProposal } from "../server/team";
 import { workspaceLabel } from "../shared/apply-plan";
 import { CLAUDE_LOCAL_SETTINGS, needsRunPermission, PASEO_RUN_RULE } from "../shared/permissions";
 import { isSharedRole, TeamSchema, type Team } from "../shared/team";
@@ -101,6 +101,20 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     }
     throw new Error("the role planner did not finish in 5 minutes");
   }, 330_000);
+
+  it("restores the pending team proposal and archives it on cancel", async () => {
+    // The planner from "gets a valid proposal" is still the workspace's pending proposal.
+    const earlier = (await pendingProposal({ workspaceId }, { paseo })).agentId;
+    expect(earlier).not.toBeNull();
+    // A new proposal replaces it.
+    const { agentId } = await proposeTeam({ workspaceId, goal: "A tiny CLI tool" }, { paseo });
+    expect((await pendingProposal({ workspaceId }, { paseo })).agentId).toBe(agentId);
+    expect((await paseo.agents.ref(earlier!).refresh())?.agent.archivedAt).toBeTruthy();
+    // Cancelling leaves nothing to restore.
+    await cancelProposal({ workspaceId }, { paseo });
+    expect((await pendingProposal({ workspaceId }, { paseo })).agentId).toBeNull();
+    expect((await paseo.agents.ref(agentId).refresh())?.agent.archivedAt).toBeTruthy();
+  }, 60_000);
 
   it("applies the team: file, workspaces and orchestrator", async () => {
     // A planner workspace with nothing left in it, as the sidebar screen leaves behind for a project without workspaces.
