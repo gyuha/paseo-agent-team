@@ -16,11 +16,20 @@ const ProjectSchema = z.object({ id: z.string(), name: z.string(), root: z.strin
 /** A workspace of the project, or the project itself when no workspace is open. */
 const TargetSchema = z.union([z.object({ workspaceId: z.string() }), z.object({ projectId: z.string() })]);
 
-/** The projects on this host that have no team file yet. */
+/** Every project on this host with its teams, orchestrator workspaces and team-file parse errors. */
 export const teamProjectsRpc = defineRpc({
   name: "team.projects",
   input: z.object({}),
-  output: z.array(ProjectSchema),
+  output: z.array(ProjectSchema.extend({
+    teams: z.array(z.object({
+      file: z.string(),
+      goal: z.string(),
+      orchestratorWorkspace: z.string(),
+      workspaceId: z.string().nullable(),
+      roles: z.number(),
+    })),
+    errors: z.array(z.string()),
+  })),
 });
 
 /** The project (or a workspace's project), the team that runs in the workspace (if any) and what this host can run. */

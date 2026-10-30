@@ -101,7 +101,7 @@ type Target = { workspaceId: string } | { projectId: string };
 
 type Applied = Extract<RpcOutput<typeof teamApplyRpc>, { ok: true }>;
 
-export const TEAMLESS_KEY = ["workspace-agents", "teamless"] as const;
+export const PROJECT_TEAMS_KEY = ["workspace-agents", "projects"] as const;
 
 export function TeamPanel({ workspaceId, ...props }: PluginWorkspacePanelProps) {
   return <TeamEditor {...props} target={{ workspaceId }} />;
@@ -165,7 +165,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
     mutationFn: (team: Team) => apply({ ...target, team }),
     onSuccess: (result) => {
       void current.refetch();
-      void queryClient.invalidateQueries({ queryKey: TEAMLESS_KEY });
+      void queryClient.invalidateQueries({ queryKey: PROJECT_TEAMS_KEY });
       if (result.ok) onApplied?.(result);
     },
   });

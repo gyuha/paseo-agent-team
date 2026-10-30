@@ -46,9 +46,9 @@ Or paste the absolute path of the checkout into **Settings → Plugins → Plugi
 
 Open a workspace in the project you want a team for, then:
 
-1. Open the Command Center and run **Create agent team**, or open the **Agent team** workspace panel. A team created from a workspace runs its orchestrator in that workspace.
+1. Open the Command Center and run **Agent teams**, or open the **Agent team** workspace panel. A team created from a workspace runs its orchestrator in that workspace.
 
-   Without an open workspace, for example on the New workspace screen, use **Create agent team** in the sidebar instead. It lists the projects that have no team yet; pick one and continue with step 2. The planner starts in an existing workspace of that project, or in a new `Team planner` workspace if it has none. After **Apply** you are taken to the orchestrator's workspace. The sidebar item is hidden once every project has a team.
+   Without an open workspace, for example on the New workspace screen, use **Agent teams** in the sidebar instead. It lists every project with its teams (orchestrator workspace, goal, role count) and any team-file errors. **Open team** opens that team's Agent team panel in its orchestrator workspace; it is disabled when that workspace no longer exists. **New team** on a project continues with step 2. The planner starts in an existing workspace of that project, or in a new `Team planner` workspace if it has none. After **Apply** you are taken to the orchestrator's workspace.
 2. Describe the goal, for example `2D platformer game`, and press **Propose a team**. A planner agent looks at the repository and proposes roles using only the providers and models that are ready on this host. It takes a minute or two; **Open planner** shows its chat.
 3. Review the proposal. You can rename roles and workspaces, pick another provider or model, set the folders each role owns, edit instructions, and add or remove roles. To have AI add a role, describe a role in a sentence or two under the role list and press **Add role with AI**: a planner agent proposes one role (name, workspace, provider and model, folders, instructions) that avoids the existing roles' names and folders, and appends it for you to review. One role is created at a time, and the planner is archived with the others on **Apply**. Problems such as an unknown model are shown in red, and **Apply** stays disabled until they are fixed.
 4. Press **Apply**.
@@ -61,7 +61,7 @@ Cleanup archives every planner agent left in the project, including ones from pr
 
 ```mermaid
 flowchart TD
-  A[Create agent team] --> B{Start from}
+  A[Agent teams · New team] --> B{Start from}
   B -->|Goal| C[Planner agent proposes roles]
   B -->|Empty team| D[Fill in roles by hand]
   C --> E[Review and edit]

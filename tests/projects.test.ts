@@ -1,20 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { plannerWorkspace, projectsWithoutTeam, type ProjectRef } from "../shared/projects";
+import { plannerWorkspace, teamWorkspaceId } from "../shared/projects";
 
-const game: ProjectRef = { id: "prj_game", name: "game", root: "/work/game" };
-const site: ProjectRef = { id: "prj_site", name: "site", root: "/work/site" };
+describe("teamWorkspaceId", () => {
+  const workspace = (id: string, projectId: string, name: string, title: string | null = null, archivingAt: string | null = null) => ({ id, projectId, name, title, archivingAt });
 
-describe("projectsWithoutTeam", () => {
-  it("keeps the projects that have no team file, in order", () => {
-    expect(projectsWithoutTeam([game, site], new Set(["prj_game"]))).toEqual([site]);
+  it("matches the workspace by title", () => {
+    expect(teamWorkspaceId([workspace("wks_a", "prj_game", "main", "Lead"), workspace("wks_b", "prj_game", "other", "Core")], "prj_game", "Core")).toBe("wks_b");
   });
 
-  it("is empty when every project has a team", () => {
-    expect(projectsWithoutTeam([game, site], new Set(["prj_game", "prj_site"]))).toEqual([]);
+  it("ignores case and surrounding whitespace", () => {
+    expect(teamWorkspaceId([workspace("wks_a", "prj_game", "main", "  Lead ")], "prj_game", " lEAD  ")).toBe("wks_a");
   });
 
-  it("is empty when there are no projects", () => {
-    expect(projectsWithoutTeam([], new Set())).toEqual([]);
+  it("falls back to the name when the title is empty", () => {
+    expect(teamWorkspaceId([workspace("wks_a", "prj_game", "lead", ""), workspace("wks_b", "prj_game", "core", "  ")], "prj_game", "Core")).toBe("wks_b");
+  });
+
+  it("ignores archived workspaces", () => {
+    expect(teamWorkspaceId([workspace("wks_old", "prj_game", "lead", "Lead", "2026-10-29T00:00:00Z")], "prj_game", "Lead")).toBeNull();
+  });
+
+  it("ignores workspaces of other projects", () => {
+    expect(teamWorkspaceId([workspace("wks_a", "prj_site", "lead", "Lead")], "prj_game", "Lead")).toBeNull();
+  });
+
+  it("is null when no workspace matches", () => {
+    expect(teamWorkspaceId([workspace("wks_a", "prj_game", "main", "Lead")], "prj_game", "Core")).toBeNull();
+    expect(teamWorkspaceId([], "prj_game", "Lead")).toBeNull();
   });
 });
 

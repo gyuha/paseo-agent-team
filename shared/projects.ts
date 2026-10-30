@@ -1,3 +1,5 @@
+import { workspaceLabel, type WorkspaceRef } from "./apply-plan";
+
 /** A Paseo project as the plugin shows it. */
 export interface ProjectRef {
   id: string;
@@ -12,9 +14,9 @@ export interface ProjectWorkspace {
   archivingAt: string | null;
 }
 
-/** The projects that can still get a team: those whose id isn't in `withTeam`. */
-export function projectsWithoutTeam(projects: readonly ProjectRef[], withTeam: ReadonlySet<string>): ProjectRef[] {
-  return projects.filter((project) => !withTeam.has(project.id));
+/** The team's non-archived orchestrator workspace in the project, or null when missing. */
+export function teamWorkspaceId(workspaces: readonly (ProjectWorkspace & WorkspaceRef)[], projectId: string, title: string): string | null {
+  return workspaces.find((workspace) => workspace.projectId === projectId && !workspace.archivingAt && workspaceLabel(workspace).trim().toLowerCase() === title.trim().toLowerCase())?.id ?? null;
 }
 
 /** A workspace of the project to run the planner in, or null when one has to be created. */

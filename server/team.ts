@@ -7,7 +7,7 @@ import { findOrchestrator, LABEL, PLANNER_WORKSPACE, plannerCleanup } from "../s
 import { CLAUDE_LOCAL_SETTINGS, needsRunPermission, PASEO_RUN_RULE, withAllowRule } from "../shared/permissions";
 import { orchestratorPrompt, teamChangedMessage } from "../shared/prompt";
 import { extractProposal, extractRole, plannerPrompt, ROLE_JSON_SCHEMA, rolePrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
-import { plannerWorkspace, projectsWithoutTeam, type ProjectRef } from "../shared/projects";
+import { plannerWorkspace, teamWorkspaceId, type ProjectRef } from "../shared/projects";
 import type { teamApplyRpc, teamProjectsRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRoleProposalRpc, teamRoleProposeRpc } from "../shared/rpc";
 import { checkTeam, parseTeam, serializeTeam, TEAM_FILE } from "../shared/team";
 import { roleOwnerOf, teamFileFor, teamIn, TEAMS_DIR, workspaceClashes, workspacesOfOtherTeams, type TeamFile } from "../shared/team-files";
@@ -56,10 +56,22 @@ function plannerProvider(entries: readonly ProviderEntry[]): string {
   return model ? `${entry.provider}/${model.id}` : entry.provider;
 }
 
-export async function teamlessProjects(_input: RpcInput<typeof teamProjectsRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamProjectsRpc>> {
-  const projects = await allProjects(paseo);
-  const hasTeam = await Promise.all(projects.map(async (project) => (await teamFileNames(project)).length > 0));
-  return projectsWithoutTeam(projects, new Set(projects.filter((_, at) => hasTeam[at]).map((project) => project.id)));
+export async function projectTeamsList(_input: RpcInput<typeof teamProjectsRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamProjectsRpc>> {
+  const [projects, { entries }] = await Promise.all([allProjects(paseo), paseo.workspaces.list()]);
+  return Promise.all(projects.map(async (project) => {
+    const { teams, errors } = await projectTeams(project);
+    return {
+      ...project,
+      teams: teams.map(({ file, team }) => ({
+        file,
+        goal: team.goal,
+        orchestratorWorkspace: team.orchestrator.workspace,
+        workspaceId: teamWorkspaceId(entries, project.id, team.orchestrator.workspace),
+        roles: team.roles.length,
+      })),
+      errors,
+    };
+  }));
 }
 
 /** The project's team files, relative to its root: the single-team file first, then the teams folder by name. */

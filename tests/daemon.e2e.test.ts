@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { applyTeam, proposeRole, teamlessProjects, proposeTeam, readTeam, roleProposal, teamProposal } from "../server/team";
+import { applyTeam, proposeRole, projectTeamsList, proposeTeam, readTeam, roleProposal, teamProposal } from "../server/team";
 import { workspaceLabel } from "../shared/apply-plan";
 import { CLAUDE_LOCAL_SETTINGS, needsRunPermission, PASEO_RUN_RULE } from "../shared/permissions";
 import { isSharedRole, TeamSchema, type Team } from "../shared/team";
@@ -56,11 +56,11 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     expect(result.catalog.some((provider) => provider.ready)).toBe(true);
   });
 
-  it("reads the same project by its id and lists it as having no team", async () => {
+  it("reads the same project by its id and lists it with no teams", async () => {
     const result = await readTeam({ projectId }, { paseo });
     expect(result.team).toBeNull();
     expect(result.project).toEqual({ id: projectId, name: expect.any(String), root });
-    expect((await teamlessProjects({}, { paseo })).some((project) => project.id === projectId)).toBe(true);
+    expect((await projectTeamsList({}, { paseo })).find((project) => project.id === projectId)?.teams).toEqual([]);
   });
 
   it("starts the planner in an existing workspace of the project when given only the project", async () => {
@@ -132,7 +132,7 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     const planners = (await paseo.agents.list()).entries.map((entry) => entry.agent).filter((agent) => agent.labels["workspace-agents"] === "planner" && !agent.archivedAt && projectWorkspaces.includes(agent.workspaceId ?? ""));
     expect(planners).toEqual([]);
 
-    // Applying again by project id reuses everything and the project no longer lists as teamless.
+    // Applying again by project id reuses everything and the project lists the team.
     const again = await applyTeam({ projectId, team: proposed }, { paseo });
     expect(again.ok && again.workspaces.every((workspace) => !workspace.created)).toBe(true);
     expect(again.ok && again.orchestratorAgentId).toBe(result.orchestratorAgentId);
@@ -146,7 +146,7 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
       expect(result.permission).toBeNull();
     }
     expect(again.ok && again.permission).toBeNull();
-    expect((await teamlessProjects({}, { paseo })).some((project) => project.id === projectId)).toBe(false);
+    expect((await projectTeamsList({}, { paseo })).find((project) => project.id === projectId)?.teams.map((team) => team.file)).toEqual([result.file]);
   }, 120_000);
 
   it("applies a team with a role that shares the orchestrator's workspace", async () => {
