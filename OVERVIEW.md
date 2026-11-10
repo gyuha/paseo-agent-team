@@ -123,7 +123,8 @@ Planner, orchestrator and role agents start in the provider's reviewed auto mode
 6. Otherwise agents use the default mode.
 
 - Auto mode and Auto-review send permission requests to an automatic reviewer. The unattended mode keeps running without asking you.
-- Auto Accept is not a reviewed mode. Cursor offers `auto_accept` as a feature toggle rather than a mode, and the plugin turns it on only when the provider has no auto, unattended or dangerous mode. If the plugin cannot read a provider's features, the agent starts in the provider's default mode.
+- Auto Accept is not a reviewed mode. Cursor offers `auto_accept` as a feature toggle rather than a mode, and the plugin turns it on only when the provider has no auto, unattended or dangerous mode. If the plugin cannot read a provider's features, the agent starts in the mode it would otherwise get, as listed above.
+- A role gets an explicit mode: its provider's automatic or unattended mode from the list above, otherwise the provider's default mode when that is one of its modes, otherwise its first mode. The orchestrator passes it as `--mode` for `paseo run` or as the mode for Paseo tools such as `create_agent`, so a role is not created without one. Only a provider with no modes keeps the default. This matters because `create_agent` without a mode inherits the orchestrator's mode, which OpenCode (modes `build` and `plan`) refuses.
 - The planner is told not to change files, but it is not technically prevented from doing so.
 
 **Allow rules in `.claude/settings.local.json`.** Some Claude setups need an allow rule so that Claude's Auto-mode reviewer does not block the orchestrator's starts:

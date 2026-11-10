@@ -7,6 +7,7 @@ export interface ProviderEntry {
   status: string;
   models?: readonly { id: string; label: string; isSelectable?: boolean }[];
   modes?: readonly { id: string; label?: string; isUnattended?: boolean; colorTier?: string }[];
+  defaultModeId?: string | null;
 }
 
 export interface ProviderInfo {
@@ -39,9 +40,20 @@ export function agentModeOf(entries: readonly ProviderEntry[], provider: string)
   )?.id;
 }
 
+/**
+ * The mode a role's agent must be created with: the automatic mode, else the provider's default mode when it is a real mode id,
+ * else its first mode. create_agent without a modeId inherits the caller's mode and fails when the role's provider lacks it
+ * (opencode has only build/plan and reports "default" as its default). Undefined only when the provider lists no modes.
+ */
+export function explicitModeOf(entries: readonly ProviderEntry[], provider: string): string | undefined {
+  const entry = entries.find((candidate) => candidate.provider === provider);
+  const modes = entry?.modes ?? [];
+  return agentModeOf(entries, provider) ?? modes.find((mode) => mode.id === entry?.defaultModeId)?.id ?? modes[0]?.id;
+}
+
 /** Each role's agent mode, keyed by role name. */
 export function roleModes(team: Team, entries: readonly ProviderEntry[]): Record<string, string | undefined> {
-  return Object.fromEntries(team.roles.map((role) => [role.name, agentModeOf(entries, role.provider)]));
+  return Object.fromEntries(team.roles.map((role) => [role.name, explicitModeOf(entries, role.provider)]));
 }
 
 export type AgentFeatures = { auto_accept: true } | undefined;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Team } from "../shared/team";
-import { agentFeaturesOf, catalogFrom, roleModes, agentModeOf, validateTeam, type ProviderEntry } from "../shared/validate";
+import { agentFeaturesOf, catalogFrom, explicitModeOf, roleModes, agentModeOf, validateTeam, type ProviderEntry } from "../shared/validate";
 
 const entries: ProviderEntry[] = [
   {
@@ -221,5 +221,46 @@ describe("agentFeaturesOf", () => {
 
   it("is undefined when the auto_accept feature is not a toggle", () => {
     expect(agentFeaturesOf(noAuto, "cursor", [{ id: "auto_accept", type: "select" }])).toBeUndefined();
+  });
+});
+
+describe("explicit mode", () => {
+  const opencode: ProviderEntry = {
+    provider: "opencode",
+    enabled: true,
+    status: "ready",
+    defaultModeId: "default",
+    modes: [{ id: "build", label: "Build" }, { id: "plan", label: "Plan" }],
+    models: [{ id: "big-pickle", label: "Big Pickle" }],
+  };
+
+  it("explicit mode falls back to the first mode for an opencode-like provider, in explicitModeOf and roleModes", () => {
+    expect(agentModeOf([opencode], "opencode")).toBeUndefined();
+    expect(explicitModeOf([opencode], "opencode")).toBe("build");
+    const team: Team = { version: 1, goal: "", orchestrator: { workspace: "o", provider: "claude", model: "m" }, roles: [{ name: "qa", provider: "opencode", model: "big-pickle", folders: [], instructions: "" }] };
+    expect(roleModes(team, [opencode])).toEqual({ qa: "build" });
+  });
+
+  it("explicit mode still lets an opencode-like provider use the auto_accept feature", () => {
+    expect(agentFeaturesOf([opencode], "opencode", [{ id: "auto_accept", type: "toggle" }])).toEqual({ auto_accept: true });
+  });
+
+  it("explicit mode uses defaultModeId when it is a real mode id", () => {
+    const entry: ProviderEntry = { provider: "p", enabled: true, status: "ready", defaultModeId: "y", modes: [{ id: "x" }, { id: "y" }] };
+    expect(explicitModeOf([entry], "p")).toBe("y");
+  });
+
+  it("explicit mode ignores a defaultModeId that is not one of the modes", () => {
+    const entry: ProviderEntry = { provider: "p", enabled: true, status: "ready", defaultModeId: "nope", modes: [{ id: "x" }, { id: "y" }] };
+    expect(explicitModeOf([entry], "p")).toBe("x");
+  });
+
+  it("explicit mode keeps an auto-like mode first and is undefined without modes", () => {
+    expect(explicitModeOf(entries, "claude")).toBe("auto");
+    expect(explicitModeOf(entries, "codex")).toBe("auto-review");
+    expect(explicitModeOf(entries, "antigravity")).toBe("full-access");
+    expect(explicitModeOf(entries, "omp")).toBeUndefined();
+    expect(explicitModeOf(entries, "unknown")).toBeUndefined();
+    expect(explicitModeOf([{ provider: "p", enabled: true, status: "ready", defaultModeId: "default", modes: [] }], "p")).toBeUndefined();
   });
 });

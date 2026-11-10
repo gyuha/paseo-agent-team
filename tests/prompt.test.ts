@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { orchestratorPrompt, teamChangedMessage } from "../shared/prompt";
+import { roleModes, type ProviderEntry } from "../shared/validate";
 import type { Team } from "../shared/team";
 
 const team: Team = {
@@ -37,7 +38,7 @@ describe("orchestratorPrompt", () => {
   it("tells it how to delegate with the role's own provider and model", () => {
     expect(prompt).toContain("paseo run --workspace <your-workspace-id> --provider <provider>/<model>");
     expect(prompt).toContain("--mode <mode>");
-    expect(prompt).toMatch(/omit `--mode` when the Mode is `default`/i);
+    expect(prompt).toMatch(/Mode from the table as `--mode` with `paseo run` or as settings\.modeId with Paseo tools, and omit it only when the Mode is `default`/i);
     expect(prompt).not.toContain("Add `--mode auto` when the provider offers");
     expect(prompt).toMatch(/wait/);
   });
@@ -148,5 +149,29 @@ describe("role features", () => {
   it("says paseo run cannot set features", () => {
     expect(orchestratorPrompt(team, modes, file, features)).toContain("`paseo run` cannot set features");
     expect(teamChangedMessage(team, modes, file, features)).toContain("`paseo run` cannot set features");
+  });
+});
+
+describe("explicit mode in the orchestrator prompt", () => {
+  const opencode: ProviderEntry = { provider: "opencode", enabled: true, status: "ready", defaultModeId: "default", modes: [{ id: "build" }, { id: "plan" }], models: [{ id: "big-pickle", label: "Big Pickle" }] };
+  const opencodeTeam: Team = { ...team, roles: [{ name: "qa", provider: "opencode", model: "big-pickle", folders: [], instructions: "" }] };
+  const features = { qa: { auto_accept: true as const } };
+  const prompt = orchestratorPrompt(opencodeTeam, roleModes(opencodeTeam, [opencode]), ".agents/teams/orchestrator.json", features);
+
+  it("explicit mode puts the real mode and the auto_accept feature in the table row", () => {
+    expect(prompt).toContain("| qa | opencode/big-pickle | build |");
+    expect(prompt).toContain('{"auto_accept":true}');
+  });
+
+  it("explicit mode tells the orchestrator to always set settings.modeId, never to keep the provider default", () => {
+    expect(prompt).toContain("settings.modeId");
+    expect(prompt).not.toContain("omit it and keep the provider default");
+    expect(prompt).toContain("Always set settings.modeId to the role's Mode from the table; omit it only when the Mode is `default`.");
+  });
+
+  it("explicit mode is also stated in the team-changed message", () => {
+    const message = teamChangedMessage(opencodeTeam, roleModes(opencodeTeam, [opencode]), ".agents/teams/orchestrator.json", features);
+    expect(message).toContain("| qa | opencode/big-pickle | build |");
+    expect(message).toContain("settings.modeId with Paseo tools; omit it only when the Mode is `default`");
   });
 });
