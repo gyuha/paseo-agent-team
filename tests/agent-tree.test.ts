@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityCounts, agentActivity, filterForest, forestActivityCounts, treeActivities, agentNode, buildAgentForest, canArchive, canDismiss, dismissibleIds, formatAgentTitle, isHidden, parentOf, titleParts, type AgentNode, type DashboardAgent } from "../shared/agent-tree";
+import { activityCounts, agentActivity, awaitingResponseCount, filterForest, forestActivityCounts, treeActivities, agentNode, buildAgentForest, canArchive, canDismiss, dismissibleIds, formatAgentTitle, isHidden, parentOf, titleParts, type AgentNode, type DashboardAgent } from "../shared/agent-tree";
 import { PROVIDER_LOGOS, providerIcon } from "../shared/provider-icons";
 
 const PARENT = "paseo.parent-agent-id";
@@ -1027,5 +1027,77 @@ describe("activity filters", () => {
   it("forestActivityCounts counts all roots over several forests and a tree in several statuses", () => {
     expect(forestActivityCounts([first, second])).toEqual({ all: 6, working: 3, awaiting: 1, idle: 5 });
     expect(forestActivityCounts([])).toEqual({ all: 0, working: 0, awaiting: 0, idle: 0 });
+  });
+});
+
+describe("awaitingResponseCount", () => {
+  const ask = { requiresAttention: true, attentionReason: "permission" };
+
+  it("awaitingResponseCount counts an agent with a pending permission prompt", () => {
+    expect(awaitingResponseCount([agent("a", ask)])).toBe(1);
+    expect(awaitingResponseCount([agent("a", ask), agent("b", { ...ask, status: "running" }), agent("c")])).toBe(2);
+  });
+
+  it("awaitingResponseCount skips an archived agent with a pending permission prompt", () => {
+    expect(awaitingResponseCount([agent("a", { ...ask, archivedAt: "2026-10-30T01:00:00Z" })])).toBe(0);
+  });
+
+  it("awaitingResponseCount does not count errors", () => {
+    expect(awaitingResponseCount([agent("a", { requiresAttention: true, attentionReason: "error" }), agent("b", { status: "error" })])).toBe(0);
+  });
+
+  it("awaitingResponseCount does not count running or finished agents", () => {
+    expect(awaitingResponseCount([agent("a", { status: "running" }), agent("b", { requiresAttention: true, attentionReason: "finished" }), agent("c", { requiresAttention: false, attentionReason: "permission" })])).toBe(0);
+  });
+
+  it("awaitingResponseCount counts a sub-agent with a pending permission prompt", () => {
+    expect(awaitingResponseCount([child("s", "p", { ...ask, subagent: true }), child("t", "p", { ...ask, archivedAt: "2026-10-30T01:00:00Z", subagent: true })])).toBe(1);
+  });
+
+  it("awaitingResponseCount is 0 for an empty list", () => {
+    expect(awaitingResponseCount([])).toBe(0);
+  });
+});
+
+describe("pendingPermissions", () => {
+  const archivedAt = "2026-10-30T01:00:00Z";
+  const pending = { status: "running", requiresAttention: false, pendingPermissions: [{}] };
+  const badge = (over: Partial<DashboardAgent>) => agentNode(agent("a", over)).badge;
+
+  it("a running agent with a pending permission request has the question badge", () => {
+    expect(badge(pending)).toBe("question");
+    const { solo } = buildAgentForest([agent("a", pending)], ["wks_a"], { showClosed: false });
+    expect(solo[0]!.badge).toBe("question");
+  });
+
+  it("a running agent with a pending permission request is awaiting and counted by awaitingResponseCount", () => {
+    expect(agentActivity(agent("a", pending))).toBe("awaiting");
+    expect(awaitingResponseCount([agent("a", pending)])).toBe(1);
+    expect(activityCounts([agent("a", pending)])).toEqual({ working: 0, awaiting: 1, idle: 0 });
+  });
+
+  it("an archived agent with a pending permission request is not counted", () => {
+    expect(awaitingResponseCount([agent("a", { ...pending, archivedAt })])).toBe(0);
+  });
+
+  it("an empty or null pendingPermissions on a running agent stays running, working and uncounted", () => {
+    for (const pendingPermissions of [[], null, undefined]) {
+      const running = agent("a", { status: "running", requiresAttention: false, pendingPermissions });
+      expect(agentNode(running).badge).toBe("running");
+      expect(agentActivity(running)).toBe("working");
+      expect(awaitingResponseCount([running])).toBe(0);
+    }
+  });
+
+  it("the question badge wins over error and running", () => {
+    expect(badge({ status: "error", pendingPermissions: [{}] })).toBe("question");
+    expect(badge({ status: "running", requiresAttention: true, attentionReason: "error", pendingPermissions: [{}] })).toBe("question");
+  });
+
+  it("the permission attention case still counts", () => {
+    const flagged = agent("a", { status: "running", requiresAttention: true, attentionReason: "permission" });
+    expect(awaitingResponseCount([flagged])).toBe(1);
+    expect(agentActivity(flagged)).toBe("awaiting");
+    expect(agentNode(flagged).badge).toBe("question");
   });
 });

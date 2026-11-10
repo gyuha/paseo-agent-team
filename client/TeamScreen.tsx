@@ -3,16 +3,18 @@ import type { PluginScreenProps, PluginSidebarItemProps } from "@getpaseo/plugin
 import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
 import { Icon, SidebarRow, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AccessibilityInfo, ActivityIndicator, Animated, Easing, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { withAlpha } from "../shared/color";
-import { activityCounts, filterForest, forestActivityCounts, type ActivityFilter, type AgentForest, type AgentNode } from "../shared/agent-tree";
+import { activityCounts, awaitingResponseCount, filterForest, forestActivityCounts, type ActivityFilter, type AgentForest, type AgentNode } from "../shared/agent-tree";
 import { messages } from "./i18n";
 import { teamDeleteRpc, teamProjectsRpc, teamReconnectRpc, teamRestoreRpc } from "../shared/rpc";
-import { AgentDashboardView, ClosedControls, DEFAULT_STATE, DensityToggle, useDashboardData, type DashboardState } from "./AgentDashboard";
+import { AgentDashboardView, ClosedControls, DEFAULT_STATE, DensityToggle, useAgentsRefresh, useDashboardAgents, useDashboardData, type DashboardState } from "./AgentDashboard";
 import { Button, PROJECT_TEAMS_KEY, styles, TeamEditor } from "./TeamPanel";
 
 export const SCREEN_ID = "team";
+
+const ACTIVITY_FILTERS: readonly ActivityFilter[] = ["all", "working", "awaiting", "idle"];
 
 /** Every project and its teams, refetched when the host's projects change. */
 function useProjectTeams() {
@@ -23,13 +25,97 @@ function useProjectTeams() {
   return useQuery({ queryKey: PROJECT_TEAMS_KEY, queryFn: () => list({}) });
 }
 
-export function TeamSidebarItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
+type SidebarColors = PluginSidebarItemProps["theme"]["colors"];
+
+/** The awaiting-answer count pill, mounted only while the count is above 0: a pulse ring while it shows, one bump on mount and whenever the count grows; both off under reduced motion. */
+function AwaitingBadge({ count, colors, label }: { count: number; colors: SidebarColors; label: string }) {
+  const pulse = useRef(new Animated.Value(0)).current;
+  const bump = useRef(new Animated.Value(1)).current;
+  const previous = useRef(0);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const native = Platform.OS !== "web";
+  useEffect(() => {
+    let active = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((value) => { if (active) setReduceMotion(value); }).catch(() => {});
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
+  const pulsing = count > 0 && !reduceMotion;
+  useEffect(() => {
+    if (!pulsing) return;
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 1400, easing: Easing.out(Easing.ease), useNativeDriver: native }),
+        Animated.delay(400),
+      ]),
+    );
+    animation.start();
+    return () => {
+      animation.stop();
+      pulse.setValue(0);
+    };
+  }, [pulsing, pulse, native]);
+  useEffect(() => {
+    const grew = count > previous.current;
+    previous.current = count;
+    if (!grew || reduceMotion) return;
+    const animation = Animated.sequence([
+      Animated.timing(bump, { toValue: 1.25, duration: 120, useNativeDriver: native }),
+      Animated.timing(bump, { toValue: 1, duration: 130, useNativeDriver: native }),
+    ]);
+    animation.start();
+    return () => {
+      animation.stop();
+      bump.setValue(1);
+    };
+  }, [count, reduceMotion, bump, native]);
+  return (
+    <View accessibilityLabel={label}>
+      {pulsing ? (
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            borderRadius: 10,
+            backgroundColor: colors.statusWarning,
+            opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] }),
+            transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.8] }) }],
+          }}
+        />
+      ) : null}
+      <Animated.View style={{ minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6, alignItems: "center", justifyContent: "center", backgroundColor: colors.statusWarning, transform: [{ scale: bump }] }}>
+        <Text style={{ color: colors.surface0, fontSize: 12, fontWeight: "700" }}>{count > 99 ? "99+" : String(count)}</Text>
+      </Animated.View>
+    </View>
+  );
+}
+
+/** The sidebar row; a badge counts agents waiting for the user's answer and opens the All agents tab. */
+export function TeamSidebarItem({ currentScreen, openScreen, theme }: PluginSidebarItemProps) {
   const { t } = useTranslation(messages);
-  return <SidebarRow icon="Users" label={t("commandTitle")} active={currentScreen?.screenId === SCREEN_ID} onPress={() => openScreen({ screenId: SCREEN_ID })} />;
+  useAgentsRefresh();
+  const agents = useDashboardAgents(false);
+  const count = awaitingResponseCount((agents.data?.entries ?? []).map((entry) => entry.agent));
+  return (
+    <SidebarRow
+      icon="Users"
+      label={t("commandTitle")}
+      active={currentScreen?.screenId === SCREEN_ID}
+      onPress={() => openScreen(count > 0 ? { screenId: SCREEN_ID, params: { tab: "agents", filter: "awaiting", at: String(Date.now()) } } : { screenId: SCREEN_ID })}
+      trailing={count > 0 ? <AwaitingBadge count={count} colors={theme.colors} label={t("screen.awaitingBadge", { count })} /> : undefined}
+    />
+  );
 }
 
 /** Browse every project's agent teams, open an existing team's panel, or create a new team. */
-export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginScreenProps & { openTeamPanel?: (workspaceId: string) => void }) {
+export function TeamScreen({ theme, layout, navigation, params, openTeamPanel }: PluginScreenProps & { openTeamPanel?: (workspaceId: string) => void }) {
   const s = useMemo(() => styles(theme.colors, layout.compact), [theme, layout.compact]);
   const { t } = useTranslation(messages);
   const projects = useProjectTeams();
@@ -37,14 +123,20 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
   const columns = layout.compact || listWidth < 720 ? 1 : listWidth < 1120 ? 2 : 3;
   const toast = useToast();
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [tab, setTab] = useState<"teams" | "agents">("teams");
+  const [tab, setTab] = useState<"teams" | "agents">(params?.tab === "agents" ? "agents" : "teams");
+  const paramFilter = ACTIVITY_FILTERS.find((filter) => filter === params?.filter);
   const [dashState, setDashState] = useState<DashboardState>(DEFAULT_STATE);
   const dashboard = useDashboardData(dashState.showClosed);
   const [closedByProject, setClosedByProject] = useState<Record<string, string[]>>({});
   const allAgents = useMemo(() => (dashboard.agents.data?.entries ?? []).map((entry) => entry.agent), [dashboard.agents.data]);
   const agentCounts = activityCounts(allAgents);
   const agentTotal = agentCounts.working + agentCounts.awaiting + agentCounts.idle;
-  const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>(paramFilter ?? "all");
+  // The sidebar badge opens this screen on the All agents tab with a filter, also when it is already open; `at` makes each press a new param set.
+  useEffect(() => {
+    if (params?.tab === "agents") setTab("agents");
+    if (paramFilter) setActivityFilter(paramFilter);
+  }, [params?.tab, params?.at, paramFilter]);
   const [forestByProject, setForestByProject] = useState<Record<string, AgentForest>>({});
   const agentSections = useMemo(() => (projects.data ?? []).flatMap((project) => {
     const ids = project.workspaces.map((workspace) => workspace.id);

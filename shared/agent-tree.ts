@@ -21,6 +21,7 @@ export interface DashboardAgent {
   archivedAt?: string | null;
   requiresAttention?: boolean;
   attentionReason?: string | null;
+  pendingPermissions?: readonly unknown[] | null;
   createdAt: string;
 }
 
@@ -81,9 +82,14 @@ export function canArchive(node: AgentNode): boolean {
     (agent.status === "error" || (agent.requiresAttention === true && agent.attentionReason === "error"));
 }
 
-/** Like the card badge, agents waiting on a permission prompt or stopped on an error await the user even while running; other running agents are working. */
+/** Waiting on the user's answer: a pending permission request (a running agent asking a question has one) or a permission attention flag. */
+function awaitsAnswer(agent: DashboardAgent): boolean {
+  return (agent.pendingPermissions?.length ?? 0) > 0 || (agent.requiresAttention === true && agent.attentionReason === "permission");
+}
+
+/** Like the card badge, agents waiting on the user's answer or stopped on an error await the user even while running; other running agents are working. */
 export function agentActivity(agent: DashboardAgent): "working" | "awaiting" | "idle" {
-  if (agent.status === "error" || (agent.requiresAttention && (agent.attentionReason === "permission" || agent.attentionReason === "error"))) return "awaiting";
+  if (awaitsAnswer(agent) || agent.status === "error" || (agent.requiresAttention && agent.attentionReason === "error")) return "awaiting";
   if (agent.status === "running") return "working";
   return "idle";
 }
@@ -95,6 +101,11 @@ export function activityCounts(agents: readonly DashboardAgent[]): { working: nu
     if (!agent.archivedAt && !agent.subagent) counts[agentActivity(agent)]++;
   }
   return counts;
+}
+
+/** Unarchived agents, sub-agents included, waiting on the user's answer (the "question" badge); errors do not count. */
+export function awaitingResponseCount(agents: readonly DashboardAgent[]): number {
+  return agents.filter((agent) => !agent.archivedAt && badgeOf(agent) === "question").length;
 }
 
 export type ActivityFilter = "all" | "working" | "awaiting" | "idle";
@@ -149,7 +160,7 @@ function kindOf(agent: DashboardAgent): AgentKind {
 }
 
 function badgeOf(agent: DashboardAgent): AgentBadge {
-  if (agent.requiresAttention && agent.attentionReason === "permission") return "question";
+  if (awaitsAnswer(agent)) return "question";
   if (agent.requiresAttention && agent.attentionReason === "error") return "attention";
   if (agent.status === "error") return "attention";
   if (agent.status === "running") return "running";

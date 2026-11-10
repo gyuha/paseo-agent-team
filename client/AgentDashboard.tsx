@@ -1173,6 +1173,56 @@ function AnimationAnchor({ value }: { value: Animated.Value }) {
   );
 }
 
+/** The agent list the dashboard and the sidebar badge share: one query key, one query function. */
+export function useDashboardAgents(showClosed: boolean) {
+  const paseo = usePaseo();
+  return useQuery({
+    queryKey: ["dashboard", "agents", showClosed],
+    queryFn: () =>
+      paseo.agents.list(
+        showClosed ? { filter: { includeArchived: true } } : {},
+      ),
+  });
+}
+
+/** Keeps the shared agent list fresh: agent events invalidate it at most once a second without cancelling a fetch in flight. */
+export function useAgentsRefresh() {
+  const paseo = usePaseo();
+  const client = useQueryClient();
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const refresh = () => {
+      if (timer !== null) return;
+      timer = setTimeout(() => {
+        timer = null;
+        void client.invalidateQueries(
+          { queryKey: ["dashboard", "agents"] },
+          { cancelRefetch: false },
+        );
+      }, 1000);
+    };
+    const off = paseo.agents.subscribe(refresh);
+    let active = true;
+    let release: (() => void) | null = null;
+    void paseo.agents
+      .list({ subscribe: {} })
+      .then(({ subscription }) => {
+        if (active)
+          release = () => {
+            void subscription.release();
+          };
+        else void subscription.release();
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+      if (timer !== null) clearTimeout(timer);
+      off();
+      release?.();
+    };
+  }, [paseo, client]);
+}
+
 /** Shared dashboard data: queries, subscriptions, animations and the archive mutation. Use once per screen or panel. */
 export function useDashboardData(showClosed: boolean) {
   const paseo = usePaseo();
@@ -1247,14 +1297,12 @@ export function useDashboardData(showClosed: boolean) {
         { queryKey: ["dashboard", key] },
         { cancelRefetch: false },
       );
-    const refreshAgents = coalesce(() => invalidate("agents"));
     const refreshWorkspaces = coalesce(() => {
       invalidate("workspaces");
       invalidate("roster");
     });
     const refreshProviders = coalesce(() => invalidate("providers"));
     const off = [
-      paseo.agents.subscribe(refreshAgents),
       paseo.workspaces.subscribe(refreshWorkspaces),
       paseo.projects.subscribe(refreshWorkspaces),
       paseo.providers.subscribe(refreshProviders),
@@ -1269,16 +1317,6 @@ export function useDashboardData(showClosed: boolean) {
     });
     let active = true;
     const releases: Array<() => void> = [];
-    void paseo.agents
-      .list({ subscribe: {} })
-      .then(({ subscription }) => {
-        if (active)
-          releases.push(() => {
-            void subscription.release();
-          });
-        else void subscription.release();
-      })
-      .catch(() => {});
     void paseo.workspaces
       .list({ subscribe: {} })
       .then(({ subscription }) => {
@@ -1297,13 +1335,8 @@ export function useDashboardData(showClosed: boolean) {
       releases.forEach((f) => f());
     };
   }, [paseo, client]);
-  const agents = useQuery({
-    queryKey: ["dashboard", "agents", showClosed],
-    queryFn: () =>
-      paseo.agents.list(
-        showClosed ? { filter: { includeArchived: true } } : {},
-      ),
-  });
+  useAgentsRefresh();
+  const agents = useDashboardAgents(showClosed);
   const workspaces = useQuery({
     queryKey: ["dashboard", "workspaces"],
     queryFn: () => paseo.workspaces.list(),
