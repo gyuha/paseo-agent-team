@@ -59,6 +59,7 @@ type TreeProps = {
   caption: (node: AgentNode) => string;
   waitingLabel: string;
   hideLabel: string;
+  openParentLabel: string;
   dismiss?: (id: string) => void;
   archive: { label: string; errorLabel: string; pending: boolean; errorId: string | null; run: (id: string) => void };
   subagentLabel: (count: number) => string;
@@ -184,6 +185,11 @@ function Badge({
       </Text>
     </View>
   );
+}
+
+/** The Paseo agent a provider sub-agent card belongs to: its dashboard id is `subagent:<paseo agent id>:<sub-agent id>`. */
+function owningAgentId(node: AgentNode): string {
+  return node.kind === "subagent" ? node.agent.id.split(":")[1] ?? node.agent.id : node.agent.id;
 }
 
 function Card(
@@ -599,11 +605,12 @@ function Card(
     </>
   ) : null;
   const card =
-    open && !node.waiting && node.kind !== "subagent" ? (
+    open && !node.waiting ? (
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={node.title}
-        onPress={() => open(node.agent.id)}
+        accessibilityHint={node.kind === "subagent" ? props.openParentLabel : undefined}
+        onPress={() => open(owningAgentId(node))}
         style={style}
       >
         {content}
@@ -1617,6 +1624,7 @@ export function AgentDashboardView(props: {
             : node.agent.provider),
     waitingLabel: t("waiting"),
     hideLabel: t("hideAgent"),
+    openParentLabel: t("openParentAgent"),
     archive: {
       label: t("archiveAgent"),
       errorLabel: t("archiveFailed"),
