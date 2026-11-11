@@ -2,8 +2,9 @@ import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useTabState, useTranslation } from "@getpaseo/plugin/client";
 import { Icon, Loading } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   Animated,
   Easing,
   Platform,
@@ -187,6 +188,92 @@ function Badge({
   );
 }
 
+/** x and y are relative to the dashboard view root once stored; the card reports them in window coordinates. */
+type TooltipData = { key: string; name: string; id: string | null; meta: string; x: number; y: number; width: number; height: number; rootWidth: number; rootHeight: number; tipWidth: number; tipHeight: number; shown: boolean };
+type TooltipApi = { show(data: TooltipData): void; hide(key: string): void };
+const TooltipContext = createContext<TooltipApi | null>(null);
+
+/** The one tooltip of a dashboard view, placed inside the view root beside the hovered card (web only). */
+function DashboardTooltip({ tip, colors, measured, onHidden }: { tip: TooltipData; colors: Colors; measured: (size: { width: number; height: number }) => void; onHidden: () => void }) {
+  const ready = tip.tipWidth > 0;
+  const opacity = useRef(new Animated.Value(0)).current;
+  const shownKey = useRef<string | null>(null);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((value) => { if (active) setReduceMotion(value); }).catch(() => {});
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
+  // Fade in once measured (from 0 for a new card), fade out on hide and then drop the tooltip; a new show stops a running fade-out.
+  useEffect(() => {
+    if (tip.shown) {
+      if (!ready) return;
+      if (shownKey.current !== tip.key) {
+        shownKey.current = tip.key;
+        opacity.setValue(0);
+      }
+      if (reduceMotion) {
+        opacity.setValue(1);
+        return;
+      }
+      const animation = Animated.timing(opacity, { toValue: 1, duration: 150, easing: Easing.out(Easing.cubic), useNativeDriver: Platform.OS !== "web" });
+      animation.start();
+      return () => animation.stop();
+    }
+    if (reduceMotion) {
+      opacity.setValue(0);
+      shownKey.current = null;
+      onHidden();
+      return;
+    }
+    const animation = Animated.timing(opacity, { toValue: 0, duration: 120, easing: Easing.out(Easing.cubic), useNativeDriver: Platform.OS !== "web" });
+    animation.start(({ finished }) => {
+      if (!finished) return;
+      shownKey.current = null;
+      onHidden();
+    });
+    return () => animation.stop();
+  }, [tip.shown, tip.key, ready, reduceMotion, opacity, onHidden]);
+  const below = tip.y + tip.height + 6;
+  const above = tip.y - tip.tipHeight - 6;
+  const top = ready && below + tip.tipHeight > tip.rootHeight && above >= 0 ? above : below;
+  const left = Math.max(4, Math.min(tip.x, tip.rootWidth - tip.tipWidth - 4));
+  return (
+    <Animated.View
+      pointerEvents="none"
+      onLayout={(event) => measured(event.nativeEvent.layout)}
+      style={{
+        position: "absolute",
+        left,
+        top,
+        maxWidth: Math.min(360, tip.rootWidth - 8),
+        paddingHorizontal: 8,
+        paddingVertical: 5,
+        borderRadius: 6,
+        backgroundColor: colors.foreground,
+        gap: 1,
+        zIndex: 1000,
+        opacity,
+        shadowColor: "#000",
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 4 },
+        elevation: 8,
+      }}
+    >
+      <Text style={{ color: colors.surface0, fontSize: 12, fontWeight: "600" }}>
+        {tip.name}
+        {tip.id !== null ? <Text style={{ opacity: 0.75 }}>{" " + tip.id}</Text> : null}
+      </Text>
+      {tip.meta ? <Text style={{ color: colors.surface0, fontSize: 11, opacity: 0.8 }}>{tip.meta}</Text> : null}
+    </Animated.View>
+  );
+}
+
 /** The Paseo agent a provider sub-agent card belongs to: its dashboard id is `subagent:<paseo agent id>:<sub-agent id>`. */
 function owningAgentId(node: AgentNode): string {
   return node.kind === "subagent" ? node.agent.id.split(":")[1] ?? node.agent.id : node.agent.id;
@@ -222,6 +309,29 @@ function Card(
     onToggleSubagents,
   } = props;
   const collapsed = Boolean(root && collapseRoot);
+  // Hover tooltip (web only): after a short delay the card is measured and the view's shared tooltip shows its full text.
+  const tooltips = useContext(TooltipContext);
+  const cardRef = useRef<View>(null);
+  const tipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tipKey = node.agent.id;
+  const hideTip = () => {
+    if (tipTimer.current !== null) clearTimeout(tipTimer.current);
+    tipTimer.current = null;
+    tooltips?.hide(tipKey);
+  };
+  const showTipSoon = () => {
+    if (Platform.OS !== "web" || tipTimer.current !== null) return;
+    tipTimer.current = setTimeout(() => {
+      tipTimer.current = null;
+      cardRef.current?.measureInWindow((x, y, width, height) => {
+        tooltips?.show({ key: tipKey, name: title.name, id: title.id, meta: [node.model, node.effort, node.mode].filter(Boolean).join(" · "), x, y, width, height, rootWidth: 0, rootHeight: 0, tipWidth: 0, tipHeight: 0, shown: true });
+      });
+    }, 1000);
+  };
+  useEffect(() => () => {
+    if (tipTimer.current !== null) clearTimeout(tipTimer.current);
+    tooltips?.hide(tipKey);
+  }, [tooltips, tipKey]);
   const subagentPill =
     !collapsed && subagentCount > 0 && onToggleSubagents ? (
       <Pressable
@@ -607,9 +717,13 @@ function Card(
   const card =
     open && !node.waiting ? (
       <Pressable
+        ref={cardRef}
         accessibilityRole="button"
         accessibilityLabel={node.title}
         accessibilityHint={node.kind === "subagent" ? props.openParentLabel : undefined}
+        onHoverIn={showTipSoon}
+        onHoverOut={hideTip}
+        onPressIn={hideTip}
         onPress={() => open(owningAgentId(node))}
         style={style}
       >
@@ -618,11 +732,11 @@ function Card(
         {archiveButton}
       </Pressable>
     ) : (
-      <View accessibilityLabel={node.title} style={style}>
+      <Pressable ref={cardRef} accessibilityLabel={node.title} focusable={false} onHoverIn={showTipSoon} onHoverOut={hideTip} onPressIn={hideTip} style={style}>
         {content}
         {hideButton}
         {archiveButton}
-      </View>
+      </Pressable>
     );
   if (!node.live) {
     return subagentPill ? (
@@ -1705,8 +1819,28 @@ export function AgentDashboardView(props: {
           )}
     </>
   );
+  const [tip, setTip] = useState<TooltipData | null>(null);
+  const rootRef = useRef<View>(null);
+  const pendingTip = useRef<string | null>(null);
+  const tooltipApi = useMemo<TooltipApi>(() => ({
+    // The card reports window coordinates; the root is measured the same way and the difference is the position inside the root.
+    show: (data) => {
+      pendingTip.current = data.key;
+      rootRef.current?.measureInWindow((rootX, rootY, rootWidth, rootHeight) => {
+        if (pendingTip.current !== data.key) return;
+        // Keep the last measured tooltip size: onLayout only fires again when the size changes.
+        setTip((current) => ({ ...data, x: data.x - rootX, y: data.y - rootY, rootWidth, rootHeight, tipWidth: current?.tipWidth ?? 0, tipHeight: current?.tipHeight ?? 0 }));
+      });
+    },
+    hide: (key) => {
+      if (pendingTip.current === key) pendingTip.current = null;
+      setTip((current) => (current?.key === key && current.shown ? { ...current, shown: false } : current));
+    },
+  }), []);
+  const dropTip = useCallback(() => setTip((current) => (current && !current.shown ? null : current)), []);
   return (
-    <>
+    <TooltipContext.Provider value={tooltipApi}>
+      <View ref={rootRef} collapsable={false} style={props.embedded ? { overflow: "visible" } : { flex: 1, overflow: "visible" }}>
       <AnimationAnchor value={flow} />
       <AnimationAnchor value={glow} />
       <AnimationAnchor value={packet} />
@@ -1730,7 +1864,16 @@ export function AgentDashboardView(props: {
           </ScrollView>
         )}
       </ScrollView>
-    </>
+      {Platform.OS === "web" && tip ? (
+        <DashboardTooltip
+          tip={tip}
+          colors={colors}
+          onHidden={dropTip}
+          measured={({ width, height }) => setTip((current) => current && (current.tipWidth === width && current.tipHeight === height ? current : { ...current, tipWidth: width, tipHeight: height }))}
+        />
+      ) : null}
+      </View>
+    </TooltipContext.Provider>
   );
 }
 
