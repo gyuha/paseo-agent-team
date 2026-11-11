@@ -2,6 +2,7 @@
   "name": "paseo-agent-team",
   "private": true,
   "version": "0.2.18",
+  "license": "MIT",
   "description": "Project-scoped agent teams for Paseo: one role per workspace, each with its own provider and model, led by an orchestrator.",
   "files": [
     "paseo-plugin.json",
