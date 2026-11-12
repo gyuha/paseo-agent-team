@@ -26,6 +26,8 @@ export const teamProjectsRpc = defineRpc({
       file: z.string(),
       goal: z.string(),
       orchestratorWorkspace: z.string(),
+      /** Titles of the workspaces the team is shared with, besides its home. */
+      sharedWorkspaces: z.array(z.string()),
       workspaceId: z.string().nullable(),
       roles: z.number(),
     })),
@@ -34,7 +36,7 @@ export const teamProjectsRpc = defineRpc({
 });
 
 /**
- * Archives the team's agents in workspaces no other team uses, then deletes its files (including an old `.agents/team.json`).
+ * Archives the team's agents in its home and shared workspaces that no other team uses, then deletes its files (including an old `.agents/team.json`).
  * Agent failures prevent file deletion; file failures are reported separately.
  */
 export const teamDeleteRpc = defineRpc({
@@ -58,6 +60,7 @@ export const teamRosterRpc = defineRpc({
   name: "team.roster",
   input: z.object({ workspaceId: z.string() }),
   output: z.object({
+    /** One entry per team workspace (home and shared), each with its own orchestrator. */
     teams: z.array(z.object({
       /** Null when the orchestrator's workspace doesn't exist. */
       orchestratorWorkspaceId: z.string().nullable(),
@@ -80,10 +83,16 @@ export const teamReadRpc = defineRpc({
     /** The project-relative file of the team that runs in the workspace, or null when it has none. */
     file: z.string().nullable(),
     team: TeamSchema.nullable(),
+    /** The workspace is the team's home (delete there); false for a shared workspace or when there is no team. */
+    home: z.boolean(),
+    /** Titles of the workspaces the team is shared with, besides its home; empty when there is no team. */
+    sharedWorkspaces: z.array(z.string()),
     /** Workspace titles the project's other teams use; a team can't use them too. */
     takenWorkspaces: z.array(z.string()),
     /** Titles of the project's workspaces; a new draft gets workspace names that aren't among them. */
     projectWorkspaces: z.array(z.string()),
+    /** The project's other teams, one per orchestrator workspace and sorted by its title, for a team copy. */
+    projectTeams: z.array(z.object({ file: z.string(), workspace: z.string(), goal: z.string(), team: TeamSchema })),
     /** Problems reading or parsing the project's team files. */
     errors: z.array(z.string()),
     /** Providers or models in the team file this host can't run. */
@@ -190,7 +199,7 @@ export const teamApplyRpc = defineRpc({
       file: z.string(),
       workspaces: z.array(AppliedWorkspaceSchema),
       orchestratorAgentId: z.string(),
-      /** Planners or planner workspaces that could not be archived; the team itself was applied. */
+      /** Planners, planner workspaces or other workspaces' orchestrators that could not be archived or notified; the team itself was applied. */
       cleanup: z.array(z.string()),
       /** The Claude settings file the orchestrator's `paseo run` allow rule was added to, or null when none was added. */
       permission: z.string().nullable(),
@@ -212,5 +221,22 @@ export const teamRestartOrchestratorRpc = defineRpc({
   output: z.discriminatedUnion("ok", [
     z.object({ ok: z.literal(false), errors: z.array(z.string()) }),
     z.object({ ok: z.literal(true), orchestratorAgentId: z.string(), archived: z.array(z.string()) }),
+  ]),
+});
+
+/** Adds the workspace to the team's shared workspaces, writes the file, starts the team's orchestrator there and notifies the other orchestrators (failures in cleanup). */
+export const teamShareRpc = defineRpc({
+  name: "team.share",
+  input: z.object({ projectId: z.string(), file: z.string(), workspaceId: z.string() }),
+  output: teamApplyRpc.output,
+});
+
+/** Removes the workspace from the team's shared workspaces, writes the file, archives the orchestrators in that workspace only and notifies the other orchestrators (failures in failures). */
+export const teamUnshareRpc = defineRpc({
+  name: "team.unshare",
+  input: z.object({ projectId: z.string(), file: z.string(), workspaceId: z.string() }),
+  output: z.discriminatedUnion("ok", [
+    z.object({ ok: z.literal(false), errors: z.array(z.string()) }),
+    z.object({ ok: z.literal(true), files: z.array(z.string()), archived: z.array(z.string()), failures: z.array(z.string()) }),
   ]),
 });

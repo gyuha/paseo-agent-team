@@ -63,3 +63,11 @@
 <!-- followup: fu-df3401582691 | source: all-agents-dashboard-tab | task: 19 | date: 2026-11-09 | status: open | taken: - -->
 - 전체 에이전트 탭의 밀도·닫힌 에이전트 표시·숨긴 목록이 화면을 떠나면 초기화된다. 호스트 단위 플러그인 설정(registerSettings)이나 다른 저장소로 유지할지 검토한다.
   Evidence: S3는 TeamScreen의 React state로 보관(화면에는 패널 탭 상태가 없음).
+
+<!-- followup: fu-362feeaab3c2 | source: copy-share-team-2of2 | task: 22 | date: 2026-11-12 | status: open | taken: - -->
+- 공유 성공 경로(teamShareRpc가 워크스페이스에 오케스트레이터를 시작하고 다른 워크스페이스에 알림)의 서버 핸들러 테스트를 추가한다.
+  Evidence: S3 tester는 providers.listFeatures·agents.create·권한 파일까지 fake가 커져 거부 경로만 테스트했다(run.md S3).
+
+<!-- followup: fu-01dcbbeea0b3 | source: copy-share-team-2of2 | task: 22 | date: 2026-11-12 | status: open | taken: - -->
+- README·OVERVIEW에 Agent teams 화면 팀 행의 "공유: …" 표시를 설명한다.
+  Evidence: release가 문서에 넣지 않았다고 보고했다(run.md S5 ⚠). 표시는 client/TeamScreen.tsx:282에 구현돼 있다.

@@ -9,11 +9,11 @@ import { withFreeWorkspaces } from "../shared/apply-plan";
 import { foldersText, newRole, parseFolders } from "../shared/draft";
 import { EMPTY_HISTORY, record, undo, redo, type DraftHistory } from "../shared/draft-history";
 import { messages } from "./i18n";
-import { teamApplyRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamEditProposalRpc, teamEditProposeRpc } from "../shared/rpc";
+import { teamApplyRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamEditProposalRpc, teamEditProposeRpc, teamShareRpc, teamUnshareRpc } from "../shared/rpc";
 import { checkTeam, type Role, type Team } from "../shared/team";
 import { applyTeamEdit, summarizeTeamEdit } from "../shared/team-edit";
 import { providerIcon } from "../shared/provider-icons";
-import { TEAMS_DIR, workspaceClashes } from "../shared/team-files";
+import { copyTeamTo, isSharedWith, TEAMS_DIR, workspaceClashes } from "../shared/team-files";
 import { validateTeam, type ProviderInfo } from "../shared/validate";
 
 type Colors = PluginWorkspacePanelProps["theme"]["colors"];
@@ -434,6 +434,8 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const proposal = useRpc(teamProposalRpc);
   const apply = useRpc(teamApplyRpc);
   const restartOrchestrator = useRpc(teamRestartOrchestratorRpc);
+  const share = useRpc(teamShareRpc);
+  const unshare = useRpc(teamUnshareRpc);
   const proposeTeamEdit = useRpc(teamEditProposeRpc);
   const teamEditProposal = useRpc(teamEditProposalRpc);
   const pendingProposal = useRpc(teamPendingProposalRpc);
@@ -456,6 +458,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const [editingRoleIndex, setEditingRoleIndex] = useState<number | null>(null);
   const [roleGroupWidth, setRoleGroupWidth] = useState(0);
   const [confirmRestart, setConfirmRestart] = useState(false);
+  const [confirmUnshare, setConfirmUnshare] = useState(false);
   const [picker, setPicker] = useState<SelectRequest | null>(null);
   const [pickerQuery, setPickerQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
@@ -566,6 +569,29 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
       if (result.ok) onApplied?.(result);
     },
   });
+  const targetWorkspaceId = "workspaceId" in target ? target.workspaceId : null;
+  const refreshTeams = () => {
+    void current.refetch();
+    void queryClient.invalidateQueries({ queryKey: PROJECT_TEAMS_KEY });
+    void queryClient.invalidateQueries({ queryKey: ["dashboard", "agents"] });
+    void queryClient.invalidateQueries({ queryKey: ["dashboard", "roster"] });
+  };
+  // Share the project's team with this workspace: the file lists it, and the team's orchestrator starts here.
+  const shared = useMutation({
+    mutationFn: (file: string) => share({ projectId: current.data!.project.id, file, workspaceId: targetWorkspaceId! }),
+    onSuccess: (result) => {
+      refreshTeams();
+      if (result.ok) onApplied?.(result);
+    },
+  });
+  const unshared = useMutation({
+    mutationFn: () => unshare({ projectId: current.data!.project.id, file: current.data!.file!, workspaceId: targetWorkspaceId! }),
+    onSuccess: (result) => {
+      if (!result.ok) return;
+      setConfirmUnshare(false);
+      refreshTeams();
+    },
+  });
   const restarted = useMutation({
     mutationFn: () => restartOrchestrator(target),
     onSuccess: () => {
@@ -636,6 +662,8 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   if (current.isLoading) return <View style={[s.screen, s.body]}><Text style={s.muted}>{t("loading")}</Text></View>;
   if (current.error) return <View style={[s.screen, s.body]}><Text style={s.danger}>{String(current.error)}</Text></View>;
   const data = current.data!;
+  // This workspace uses a team whose home is elsewhere: it can stop sharing instead of deleting.
+  const sharedHere = Boolean(data.team && data.workspace !== null && !data.home && isSharedWith(data.team, data.workspace));
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
@@ -645,11 +673,31 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
       {data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>)}
       {data.team && !draft ? (
         <View style={[s.card, { maxWidth: 960, width: "100%", alignSelf: "flex-start" }]}>
+          {data.sharedWorkspaces.length && data.workspace !== null ? (
+            <Text style={s.muted}>
+              {data.home
+                ? t("current.sharedWithHome", { workspaces: data.sharedWorkspaces.join(", ") })
+                : t("current.sharedTeam", { home: data.team.orchestrator.workspace, count: data.sharedWorkspaces.length + 1 })}
+            </Text>
+          ) : null}
           <View style={[s.row, { justifyContent: "flex-end" }]}>
             <Button s={s} label={t("current.edit")} onPress={() => { resetEditHistory(); cancelTeamEdit(); setDraft(data.team); }} />
             <Button s={s} secondary label={t("current.reapply")} disabled={applied.isPending || restarted.isPending} onPress={() => applied.mutate(data.team!)} />
             <Button s={s} secondary label={t("current.restart")} disabled={applied.isPending || restarted.isPending} onPress={() => setConfirmRestart(true)} />
+            {sharedHere ? <Button s={s} secondary label={t("current.unshare")} disabled={unshared.isPending} onPress={() => setConfirmUnshare(true)} /> : null}
           </View>
+          {sharedHere && confirmUnshare ? (
+            <View style={{ backgroundColor: theme.colors.surface2, borderRadius: 6, padding: 10, gap: 6 }}>
+              <Text style={s.text}>{t("current.unshareConfirm", { home: data.team.orchestrator.workspace })}</Text>
+              <View style={s.row}>
+                <Button s={s} label={t("current.unshare")} disabled={unshared.isPending} onPress={() => unshared.mutate()} />
+                <Button s={s} secondary label={t("review.cancel")} disabled={unshared.isPending} onPress={() => setConfirmUnshare(false)} />
+              </View>
+              {unshared.error ? <Text style={s.danger}>{String(unshared.error)}</Text> : null}
+              {unshared.data && !unshared.data.ok ? unshared.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
+              {unshared.data?.ok && unshared.data.failures.length ? unshared.data.failures.map((failure) => <Text key={failure} style={s.danger}>{failure}</Text>) : null}
+            </View>
+          ) : null}
           <CurrentTeamTree team={data.team} s={s} colors={theme.colors} compact={layout.compact} icons={providerIcons} />
           {data.validation.map((error) => <Text key={error.target + error.message} style={s.danger}>{error.target}: {error.message}</Text>)}
           <Text style={s.muted}>{t("current.restartHint")}</Text>
@@ -806,6 +854,32 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
           </View>
           {planning.data?.status === "failed" ? planning.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
           {start.error ? <Text style={s.danger}>{String(start.error)}</Text> : null}
+          {here !== null && data.projectTeams.length ? (
+            <View style={{ marginTop: 6, borderTopWidth: 1, borderTopColor: theme.colors.border, paddingTop: 10, gap: 6 }}>
+              <Text style={[s.text, { fontWeight: "600" }]}>{t("create.copyTitle")}</Text>
+              <Text style={s.muted}>{t("create.copyHint")}</Text>
+              <View style={{ borderWidth: 1, borderColor: theme.colors.border, borderRadius: 6, overflow: "hidden" }}>
+                {data.projectTeams.map((entry, index) => (
+                  <View key={entry.file} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, paddingVertical: 8, borderTopWidth: index > 0 ? 1 : 0, borderTopColor: theme.colors.border }}>
+                    <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+                        <Text style={[s.text, { flexShrink: 1, fontWeight: "600" }]}>{entry.workspace}</Text>
+                        <Text style={s.muted}>{t("screen.roles", { count: entry.team.roles.length })}</Text>
+                      </View>
+                      {entry.goal ? <Text style={s.muted} numberOfLines={2}>{entry.goal}</Text> : null}
+                    </View>
+                    <View style={s.row}>
+                      <Button s={s} secondary label={t("create.copy")} disabled={shared.isPending} onPress={() => { resetEditHistory(); cancelTeamEdit(); setDraft(fresh(copyTeamTo(entry.team, here))); }} />
+                      <Button s={s} secondary label={t("create.share")} disabled={shared.isPending || targetWorkspaceId === null} onPress={() => shared.mutate(entry.file)} />
+                    </View>
+                  </View>
+                ))}
+              </View>
+              {shared.isPending ? <View style={s.row}><ActivityIndicator color={theme.colors.accent} /><Text style={s.muted}>{t("result.applying")}</Text></View> : null}
+              {shared.error ? <Text style={s.danger}>{String(shared.error)}</Text> : null}
+              {shared.data && !shared.data.ok ? shared.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
+            </View>
+          ) : null}
         </View>
       ) : (
         <SelectContext.Provider value={openSelect}>
@@ -813,8 +887,10 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
             <Text style={s.title}>{t("review.title")}</Text>
             <View style={s.orchestratorCard}>
               <Text style={s.orchestratorLabel}>{t("review.orchestrator")}</Text>
-              {here === null ? (
+              {here === null && !(data.team && data.sharedWorkspaces.length) ? (
                 <TextInput style={s.input} value={draft.orchestrator.workspace} placeholder={t("role.workspace")} onChangeText={(workspace) => setDraft((current) => (current ? { ...current, orchestrator: { ...current.orchestrator, workspace } } : current))} />
+              ) : here === null ? (
+                <Text style={s.muted}>{draft.orchestrator.workspace}</Text>
               ) : (
                 <Text style={s.text}>{t("review.orchestratorHere", { workspace: here })}</Text>
               )}

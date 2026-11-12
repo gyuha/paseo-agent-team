@@ -260,7 +260,12 @@ export function TeamScreen({ theme, layout, navigation, params, openTeamPanel }:
     columnWeights[lightest]! += 2 + project.teams.length;
   }
   const renderProject = (project: ProjectEntry) => {
-    const occupiedWorkspaces = new Set(project.teams.map((team) => team.workspaceId).filter((id) => id != null));
+    const titleKey = (title: string) => title.trim().toLowerCase();
+    const sharedTitles = new Set(project.teams.flatMap((team) => team.sharedWorkspaces).map(titleKey));
+    const occupiedWorkspaces = new Set([
+      ...project.teams.map((team) => team.workspaceId).filter((id) => id != null),
+      ...project.workspaces.filter((workspace) => sharedTitles.has(titleKey(workspace.title))).map((workspace) => workspace.id),
+    ]);
     const reconnectWorkspaces = project.workspaces.filter((workspace) => !occupiedWorkspaces.has(workspace.id));
     return (
       <View key={project.id} style={[s.card, { minWidth: 0, padding: 0, gap: 0, overflow: "hidden" }]}>
@@ -274,6 +279,7 @@ export function TeamScreen({ theme, layout, navigation, params, openTeamPanel }:
               <Text style={s.muted}>{t("screen.roles", { count: team.roles })}</Text>
             </View>
             {team.goal ? <Text style={s.muted} numberOfLines={2}>{team.goal}</Text> : null}
+            {team.sharedWorkspaces.length ? <Text style={s.muted}>{t("screen.sharedWith", { workspaces: team.sharedWorkspaces.join(", ") })}</Text> : null}
             {!team.workspaceId ? <Text style={{ color: theme.colors.statusWarning, fontSize: 12 }}>{t("screen.workspaceMissing")}</Text> : null}
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               {team.workspaceId ? (
@@ -306,6 +312,7 @@ export function TeamScreen({ theme, layout, navigation, params, openTeamPanel }:
             {confirming === `${project.id}:${team.file}` ? (
               <View style={insetPanel}>
                 <Text style={s.text}>{t("screen.deleteConfirm", { file: team.file })}</Text>
+                {team.sharedWorkspaces.length ? <Text style={s.text}>{t("screen.deleteShared", { workspaces: team.sharedWorkspaces.join(", ") })}</Text> : null}
                 <View style={s.row}>
                   <Button s={s} label={t("screen.deleteYes")} disabled={deleted.isPending} onPress={() => deleted.mutate({ projectId: project.id, file: team.file })} />
                   <Button s={s} secondary label={t("review.cancel")} disabled={deleted.isPending} onPress={() => setConfirming(null)} />

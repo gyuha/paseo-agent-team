@@ -1,10 +1,18 @@
 import type { Team } from "./team";
+import { teamWorkspaces } from "./team-files";
 import type { AgentFeatures } from "./validate";
 
 const MODE_RULE = "Start each role's agent with its Mode from the table: `--mode <mode>` with `paseo run`, settings.modeId with Paseo tools; omit it only when the Mode is `default`.";
 
-function workspaceLookup(team: Team): string {
-  return `Your own workspace id is the one whose title is "${team.orchestrator.workspace}" in this project (Paseo tools, or \`paseo workspace ls --json\`). Use that id as <your-workspace-id> in \`paseo run\`.`;
+function workspaceLookup(workspace: string): string {
+  return `Your own workspace id is the one whose title is "${workspace}" in this project (Paseo tools, or \`paseo workspace ls --json\`). Use that id as <your-workspace-id> in \`paseo run\`.`;
+}
+
+/** For a shared team, which other workspaces use the same file; empty when the team is not shared. */
+function sharedNote(team: Team, workspace: string, file: string): string[] {
+  const others = teamWorkspaces(team).filter((title) => title.trim().toLowerCase() !== workspace.trim().toLowerCase());
+  if (!team.orchestrator.sharedWorkspaces?.length || !others.length) return [];
+  return [`This team definition is shared with the workspaces ${others.map((title) => `"${title}"`).join(", ")}, each with its own orchestrator and role agents; editing ${file} changes the team in all of them. Never start or continue agents in those workspaces.`];
 }
 
 // A provider can have a single, unattended mode (Antigravity has only `full-access`); swapping it fails or changes the team.
@@ -30,23 +38,27 @@ function featureRules(team: Team, features?: Record<string, AgentFeatures>): str
   ];
 }
 
-/** The orchestrator's standing instructions, rendered from the team definition in `file` (project-relative). */
-export function orchestratorPrompt(team: Team, modes: Record<string, string | undefined>, file: string, features?: Record<string, AgentFeatures>): string {
+/**
+ * The orchestrator's standing instructions, rendered from the team definition in `file` (project-relative).
+ * `workspace` is the orchestrator's own workspace title: the team's home, or one of its shared workspaces.
+ */
+export function orchestratorPrompt(team: Team, modes: Record<string, string | undefined>, file: string, features?: Record<string, AgentFeatures>, workspace: string = team.orchestrator.workspace): string {
   const notes = team.roles.filter((role) => role.instructions.trim()).map((role) => `- ${role.name}: ${role.instructions.trim()}`);
   return [
     "You are the orchestrator of this project's agent team in Paseo.",
     team.goal.trim() ? `Team goal: ${team.goal.trim()}` : "",
     `The team is defined in ${file} at the project root. Re-read it before delegating; it wins over this summary if they differ.`,
     "Other workspaces of this project may run other teams from other files in .agents/. Ignore them and their workspaces.",
+    ...sharedNote(team, workspace, file),
     "",
     "## Team",
     ...teamTable(team, modes, features),
-    `Every role runs in the orchestrator's workspace "${team.orchestrator.workspace}".`,
+    `Every role runs in the orchestrator's workspace "${workspace}".`,
     ...(notes.length ? ["", "## Role notes", ...notes] : []),
     "",
     "## How to delegate",
     "- Split each request into parts and give each part to the role that owns it. Do the work yourself only when no role fits.",
-    workspaceLookup(team),
+    workspaceLookup(workspace),
     "- Start a role's agent in your own workspace with exactly that role's provider and model: Paseo tools, or `paseo run --workspace <your-workspace-id> --provider <provider>/<model> --mode <mode> --title <role>#<id> --label role=<role> --no-wait \"<task>\"`. Use 4 random uppercase hex characters for <id> (e.g. ui#ADB2); set the same agent title through Paseo tools. Use the role's Mode from the table as `--mode` with `paseo run` or as settings.modeId with Paseo tools, and omit it only when the Mode is `default`.",
     `- ${NO_SUBSTITUTE}`,
     ...featureRules(team, features).map((rule) => `- ${rule}`),
@@ -58,13 +70,14 @@ export function orchestratorPrompt(team: Team, modes: Record<string, string | un
     .join("\n");
 }
 
-/** What a running orchestrator is told when the team is applied again. */
-export function teamChangedMessage(team: Team, modes: Record<string, string | undefined>, file: string, features?: Record<string, AgentFeatures>): string {
+/** What a running orchestrator is told when the team is applied again; `workspace` is that orchestrator's own workspace title. */
+export function teamChangedMessage(team: Team, modes: Record<string, string | undefined>, file: string, features?: Record<string, AgentFeatures>, workspace: string = team.orchestrator.workspace): string {
   return [
     `The team in ${file} changed. Re-read it and use it from now on.`,
-    `Every role now runs in the orchestrator's workspace "${team.orchestrator.workspace}". Earlier instructions about per-role workspaces no longer apply.`,
+    `Every role now runs in the orchestrator's workspace "${workspace}". Earlier instructions about per-role workspaces no longer apply.`,
+    ...sharedNote(team, workspace, file),
     "Start and continue role agents only in your own workspace. Find a role's unarchived agent by label role=<role> and continue it with send; start it here if none exists.",
-    workspaceLookup(team),
+    workspaceLookup(workspace),
     "", ...teamTable(team, modes, features), "", MODE_RULE, NO_SUBSTITUTE, ...featureRules(team, features),
   ].join("\n");
 }

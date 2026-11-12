@@ -141,7 +141,7 @@ In **Detailed** density, each card shows the provider logo, the role or caption,
 
 ### 5. Run another team in another workspace
 
-Open the **Agent team** panel in a workspace that has no team yet and create one as in step 1. Its orchestrator runs in that workspace, and the team is written to its own file in `.agents/teams/`. Each team's orchestrator reads only its own file, so the teams don't change each other.
+Open the **Agent team** panel in a workspace that has no team yet and create one as in step 1. Its orchestrator runs in that workspace, and the team is written to its own file in `.agents/teams/`. Each team's orchestrator reads only its own file, so the teams don't change each other. The panel's create view also lists the project's other teams with a **Copy** button: it opens the review screen with that team's goal, roles and orchestrator provider and model, and this workspace as the orchestrator workspace. Nothing is written until **Apply**, and the copy stays independent of the original team. **Share** next to **Copy** instead adds this workspace to the team's file as a shared workspace and starts the team's orchestrator here; roles run in this workspace too. The team file stays in its home workspace. A shared team's panel says it is shared, and edits, AI edits and Apply from any of its workspaces change that one file. In a shared workspace, **Unshare** removes it from the list and closes only the orchestrator there. Deleting the team from the **Agent teams** screen removes it everywhere, and its confirmation lists the shared workspaces.
 ```
 Workspace A panel → team A (.agents/teams/a.json) → orchestrator in A
 Workspace B panel → team B (.agents/teams/b.json) → orchestrator in B
@@ -194,6 +194,7 @@ The plugin's UI follows Paseo's app language. English is the default, and Englis
 ## Limitations
 
 - A role's model applies to agents started by the orchestrator or this plugin. Agents you start yourself in the team's workspace from Paseo's own UI still use whatever model you pick there.
+- Renaming a shared workspace detaches only that workspace. Teams still never share a workspace with another team, and sharing works only within one project.
 - A team's file is matched to its workspace by `orchestrator.workspace`. Renaming that workspace in Paseo or in the file detaches the team from it until the two match again. Paseo has no rename event, so after renaming in Paseo, press **Reconnect** on the team's row (or edit `orchestrator.workspace` in the file) to reattach it.
 - All roles run in one workspace, so they share one checkout and folder. Keep roles to separate folders, or have the orchestrator run overlapping work in sequence.
 - A team file written by an older version may still list a workspace for a role. Roles still run in the orchestrator's workspace, but until the next Apply rewrites the file, those workspaces stay reserved for the team, and deleting the team also archives its role agents there. Apply removes them from the file. Workspaces created for roles by older versions are not archived, so archive them yourself.

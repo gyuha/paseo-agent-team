@@ -63,7 +63,7 @@ Your request → Orchestrator splits it by role → each role's agent works in t
 
 - A project can run several teams, one per workspace. A team belongs to the workspace its orchestrator runs in, and the **Agent team** panel of that workspace shows that team.
 - Each team has its own file in `.agents/teams/`, and each team's orchestrator reads only its own file, so teams do not change each other.
-- To create another team, open the **Agent team** panel in a workspace that has no team yet and create one as usual.
+- To create another team, open the **Agent team** panel in a workspace that has no team yet and create one as usual. The create view also lists the project's other teams with a **Copy** button: it opens the review screen with that team's goal, roles and orchestrator provider and model, and this workspace as the orchestrator workspace. Nothing is written until **Apply**, and the copy stays independent of the original team. **Share** next to **Copy** instead adds this workspace to the team's file as a shared workspace and starts the team's orchestrator here; roles run in this workspace too. The team file stays in its home workspace. A shared team's panel says it is shared, and edits, AI edits and Apply from any of its workspaces change that one file. In a shared workspace, **Unshare** removes it from the list and closes only the orchestrator there. Deleting the team from the **Agent teams** screen removes it everywhere, and its confirmation lists the shared workspaces.
 
 ```
 Workspace A panel → team A (.agents/teams/a.json) → orchestrator in A
@@ -147,6 +147,7 @@ English, Korean, Japanese and Simplified Chinese UI text are included. Daemon-si
 
 ## Limitations
 
+- **Shared teams.** Renaming a shared workspace detaches only that workspace. Teams still never share a workspace with another team, and sharing works only within one project.
 - **Shared checkout.** All roles run in the orchestrator's workspace and share one project checkout. Folder assignments guide agents but do not enforce filesystem isolation. Avoid overlapping work, or ask the orchestrator to sequence it.
 - **Model scope.** A role's model applies to agents started by the orchestrator or this plugin. Agents you start yourself in the team's workspace from Paseo's own UI still use whatever model you pick there.
 - **Workspace matching.** A team is matched to its workspace by `orchestrator.workspace`. Renaming that workspace in Paseo or in the file detaches the team until the two match again. Paseo has no rename event, so after renaming in Paseo, press **Reconnect** on the team's row, or edit `orchestrator.workspace` in the file.

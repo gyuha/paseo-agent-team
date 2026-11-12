@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { serializeTeam, type Team } from "../shared/team";
-import { legacyWorkspacesOf, teamFileFor, teamFileWorkspaces, teamIn, workspaceClashes, workspaceOwnerOf, workspacesOfOtherTeams, type TeamFile } from "../shared/team-files";
+import { copyTeamTo, legacyWorkspacesOf, teamFileFor, teamFileWorkspaces, teamIn, workspaceClashes, workspaceOwnerOf, workspacesOfOtherTeams, type TeamFile } from "../shared/team-files";
 
 const team = (workspace: string, roles: { name: string }[]): Team => ({
   version: 1,
@@ -139,5 +139,37 @@ describe("legacy role workspaces", () => {
     expect(teamFileWorkspaces(rewritten)).toEqual(["Old lead"]);
     expect(workspaceOwnerOf([rewritten], "design")).toBeUndefined();
     expect(workspaceClashes(team("design", [{ name: "x" }]), workspacesOfOtherTeams([rewritten, legacy[1]!], "New lead")).length).toBe(0);
+  });
+});
+
+describe("team copy", () => {
+  const source: Team = {
+    version: 1,
+    goal: "Ship the web app",
+    orchestrator: { workspace: "lead", provider: "codex", model: "gpt-6.1-sol" },
+    roles: [
+      { name: "frontend", provider: "claude", model: "claude-sonnet-5-5", folders: ["apps/web", "packages/ui"], instructions: "Builds the UI." },
+      { name: "backend", provider: "codex", model: "gpt-6.1-sol", folders: [], instructions: "Builds the API." },
+    ],
+  };
+
+  it("team copy sets the trimmed target workspace and keeps goal, roles and orchestrator provider/model", () => {
+    const copy = copyTeamTo(source, "  side  ");
+    expect(copy.orchestrator).toEqual({ workspace: "side", provider: "codex", model: "gpt-6.1-sol" });
+    expect(copy.goal).toBe("Ship the web app");
+    expect(copy.version).toBe(1);
+    expect(copy.roles).toEqual(source.roles);
+  });
+
+  it("team copy does not mutate the input and shares no arrays with it", () => {
+    const snapshot = structuredClone(source);
+    const copy = copyTeamTo(source, "side");
+    expect(source).toEqual(snapshot);
+    expect(copy).not.toBe(source);
+    expect(copy.orchestrator).not.toBe(source.orchestrator);
+    expect(copy.roles[0]).not.toBe(source.roles[0]);
+    copy.roles[0]!.folders.push("extra");
+    copy.roles[0]!.instructions = "changed";
+    expect(source).toEqual(snapshot);
   });
 });

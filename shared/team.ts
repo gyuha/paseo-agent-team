@@ -11,6 +11,8 @@ export const OrchestratorSchema = z.object({
   workspace: name,
   provider: name,
   model: name,
+  /** Shared workspaces: other workspace titles that run this same team definition with their own orchestrator (ADR 261112-222439). */
+  sharedWorkspaces: z.array(name).optional(),
 });
 
 export const RoleSchema = z.object({

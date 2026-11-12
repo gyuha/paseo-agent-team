@@ -1,6 +1,6 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { applyTeam, cancelProposal, deleteTeam, improveInstructions, instructionsProposal, pendingProposal, projectTeamsList, proposeTeamEdit, proposeTeam, readTeam, reconnectTeam, restartOrchestrator, restoreTeam, teamEditProposal, teamProposal, teamRoster } from "./server/team";
-import { teamApplyRpc, teamDeleteRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamRestoreRpc, teamEditProposalRpc, teamEditProposeRpc, teamRosterRpc } from "./shared/rpc";
+import { applyTeam, cancelProposal, deleteTeam, improveInstructions, instructionsProposal, pendingProposal, projectTeamsList, proposeTeamEdit, proposeTeam, readTeam, reconnectTeam, restartOrchestrator, restoreTeam, shareWorkspace, teamEditProposal, teamProposal, teamRoster, unshareWorkspace } from "./server/team";
+import { teamApplyRpc, teamDeleteRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamRestoreRpc, teamEditProposalRpc, teamEditProposeRpc, teamRosterRpc, teamShareRpc, teamUnshareRpc } from "./shared/rpc";
 
 export default function contribute(server: PluginServerContext) {
   server.handle(teamProjectsRpc, projectTeamsList);
@@ -19,5 +19,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(teamRestoreRpc, restoreTeam);
   server.handle(teamRestartOrchestratorRpc, restartOrchestrator);
   server.handle(teamRosterRpc, teamRoster);
+  server.handle(teamShareRpc, shareWorkspace);
+  server.handle(teamUnshareRpc, unshareWorkspace);
   return () => {};
 }

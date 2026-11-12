@@ -1,7 +1,7 @@
 import { uniqueName } from "./draft";
 import type { Team } from "./team";
 
-/** Applies a proposed draft while keeping the team's identity and making role names unique. */
+/** Applies a proposed draft while keeping the team's identity (home and shared workspaces, which the planner never sees) and making role names unique. */
 export function applyTeamEdit(draft: Team, proposed: Team): Team {
   const taken: string[] = [];
   const roles = proposed.roles.map((role) => {
@@ -9,7 +9,9 @@ export function applyTeamEdit(draft: Team, proposed: Team): Team {
     taken.push(name);
     return { ...role, name };
   });
-  return { ...proposed, version: draft.version, orchestrator: { ...proposed.orchestrator, workspace: draft.orchestrator.workspace }, roles };
+  const { sharedWorkspaces: _proposed, ...orchestrator } = proposed.orchestrator;
+  const shared = draft.orchestrator.sharedWorkspaces;
+  return { ...proposed, version: draft.version, orchestrator: { ...orchestrator, workspace: draft.orchestrator.workspace, ...(shared ? { sharedWorkspaces: shared } : {}) }, roles };
 }
 
 /** Compares roles by trimmed, case-sensitive name; a rename is an addition and a removal. */
