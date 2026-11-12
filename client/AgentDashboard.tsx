@@ -320,7 +320,7 @@ function Card(
     tooltips?.hide(tipKey);
   };
   const showTipSoon = () => {
-    if (Platform.OS !== "web" || tipTimer.current !== null) return;
+    if (Platform.OS !== "web" || !tooltips || tipTimer.current !== null) return;
     tipTimer.current = setTimeout(() => {
       tipTimer.current = null;
       cardRef.current?.measureInWindow((x, y, width, height) => {
@@ -1839,7 +1839,7 @@ export function AgentDashboardView(props: {
   }), []);
   const dropTip = useCallback(() => setTip((current) => (current && !current.shown ? null : current)), []);
   return (
-    <TooltipContext.Provider value={tooltipApi}>
+    <TooltipContext.Provider value={state.density === "detailed" ? null : tooltipApi}>
       <View ref={rootRef} collapsable={false} style={props.embedded ? { overflow: "visible" } : { flex: 1, overflow: "visible" }}>
       <AnimationAnchor value={flow} />
       <AnimationAnchor value={glow} />
@@ -1864,7 +1864,7 @@ export function AgentDashboardView(props: {
           </ScrollView>
         )}
       </ScrollView>
-      {Platform.OS === "web" && tip ? (
+      {Platform.OS === "web" && tip && state.density !== "detailed" ? (
         <DashboardTooltip
           tip={tip}
           colors={colors}
