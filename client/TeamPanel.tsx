@@ -1,7 +1,7 @@
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
-import { Icon, Modal } from "@getpaseo/plugin/client/ui";
+import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
@@ -9,7 +9,7 @@ import { withFreeWorkspaces } from "../shared/apply-plan";
 import { foldersText, newRole, parseFolders } from "../shared/draft";
 import { EMPTY_HISTORY, record, undo, redo, type DraftHistory } from "../shared/draft-history";
 import { messages } from "./i18n";
-import { teamApplyRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamEditProposalRpc, teamEditProposeRpc, teamShareRpc, teamUnshareRpc } from "../shared/rpc";
+import { teamApplyRpc, teamDeleteRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamEditProposalRpc, teamEditProposeRpc, teamShareRpc, teamUnshareRpc } from "../shared/rpc";
 import { checkTeam, type Role, type Team } from "../shared/team";
 import { applyTeamEdit, summarizeTeamEdit } from "../shared/team-edit";
 import { providerIcon } from "../shared/provider-icons";
@@ -475,6 +475,8 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const apply = useRpc(teamApplyRpc);
   const restartOrchestrator = useRpc(teamRestartOrchestratorRpc);
   const share = useRpc(teamShareRpc);
+  const removeTeam = useRpc(teamDeleteRpc);
+  const toast = useToast();
   const unshare = useRpc(teamUnshareRpc);
   const proposeTeamEdit = useRpc(teamEditProposeRpc);
   const teamEditProposal = useRpc(teamEditProposalRpc);
@@ -499,6 +501,8 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const [roleGroupWidth, setRoleGroupWidth] = useState(0);
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [confirmUnshare, setConfirmUnshare] = useState(false);
+  // The file of the copy-list row waiting for a second press.
+  const [deletingFile, setDeletingFile] = useState<string | null>(null);
   const [picker, setPicker] = useState<SelectRequest | null>(null);
   const [pickerQuery, setPickerQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
@@ -622,6 +626,16 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
     onSuccess: (result) => {
       refreshTeams();
       if (result.ok) onApplied?.(result);
+    },
+  });
+  const removed = useMutation({
+    mutationFn: (file: string) => removeTeam({ projectId: current.data!.project.id, file }),
+    onSuccess: (result) => {
+      if (result.failures.length) toast.error(t("screen.deleteFailed", { failure: result.failures.join("; ") }));
+      if (result.fileFailures.length) toast.error(t("screen.deleteFileFailed", { failure: result.fileFailures.join("; ") }));
+      setDeletingFile(null);
+      refreshTeams();
+      void queryClient.invalidateQueries({ queryKey: ["workspace-agents", "team"] });
     },
   });
   const unshared = useMutation({
@@ -900,18 +914,35 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
               <Text style={s.muted}>{t("create.copyHint")}</Text>
               <View style={{ borderWidth: 1, borderColor: theme.colors.border, borderRadius: 6, overflow: "hidden" }}>
                 {data.projectTeams.map((entry, index) => (
-                  <View key={entry.file} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, paddingVertical: 8, borderTopWidth: index > 0 ? 1 : 0, borderTopColor: theme.colors.border }}>
-                    <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-                      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-                        <Text style={[s.text, { flexShrink: 1, fontWeight: "600" }]}>{entry.workspace}</Text>
-                        <Text style={s.muted}>{t("screen.roles", { count: entry.team.roles.length })}</Text>
+                  <View key={entry.file} style={{ borderTopWidth: index > 0 ? 1 : 0, borderTopColor: theme.colors.border }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, paddingVertical: 8 }}>
+                      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+                          <Text style={[s.text, { flexShrink: 1, fontWeight: "600" }]}>{entry.workspace}</Text>
+                          <Text style={s.muted}>{t("screen.roles", { count: entry.team.roles.length })}</Text>
+                        </View>
+                        {entry.goal ? <Text style={s.muted} numberOfLines={2}>{entry.goal}</Text> : null}
                       </View>
-                      {entry.goal ? <Text style={s.muted} numberOfLines={2}>{entry.goal}</Text> : null}
+                      <View style={s.row}>
+                        <Button s={s} secondary label={t("create.copy")} disabled={shared.isPending || removed.isPending} onPress={() => { resetEditHistory(); cancelTeamEdit(); setDraft(fresh(copyTeamTo(entry.team, here))); }} />
+                        <Button s={s} secondary label={t("create.share")} disabled={shared.isPending || removed.isPending || targetWorkspaceId === null} onPress={() => shared.mutate(entry.file)} />
+                        <Pressable accessibilityRole="button" accessibilityLabel={t("screen.deleteTeam")} disabled={shared.isPending || removed.isPending} hitSlop={8} onPress={() => { removed.reset(); setDeletingFile(entry.file); }} style={{ opacity: shared.isPending || removed.isPending ? 0.5 : 1 }}>
+                          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>{t("screen.deleteTeam")}</Text>
+                        </Pressable>
+                      </View>
                     </View>
-                    <View style={s.row}>
-                      <Button s={s} secondary label={t("create.copy")} disabled={shared.isPending} onPress={() => { resetEditHistory(); cancelTeamEdit(); setDraft(fresh(copyTeamTo(entry.team, here))); }} />
-                      <Button s={s} secondary label={t("create.share")} disabled={shared.isPending || targetWorkspaceId === null} onPress={() => shared.mutate(entry.file)} />
-                    </View>
+                    {deletingFile === entry.file ? (
+                      <View style={{ backgroundColor: theme.colors.surface2, borderRadius: 6, padding: 8, gap: 6, marginHorizontal: 10, marginBottom: 8 }}>
+                        <Text style={s.text}>{t("screen.deleteConfirm", { file: entry.file })}</Text>
+                        {entry.team.orchestrator.sharedWorkspaces?.length ? <Text style={s.text}>{t("screen.deleteShared", { workspaces: entry.team.orchestrator.sharedWorkspaces.join(", ") })}</Text> : null}
+                        <View style={s.row}>
+                          <Button s={s} compact label={t("screen.deleteYes")} disabled={removed.isPending} onPress={() => removed.mutate(entry.file)} />
+                          <Button s={s} compact secondary label={t("review.cancel")} disabled={removed.isPending} onPress={() => setDeletingFile(null)} />
+                          {removed.isPending ? <ActivityIndicator color={theme.colors.accent} /> : null}
+                        </View>
+                        {removed.error ? <Text style={s.danger}>{String(removed.error)}</Text> : null}
+                      </View>
+                    ) : null}
                   </View>
                 ))}
               </View>
